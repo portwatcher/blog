@@ -1,0 +1,45 @@
+@font-face {
+  font-family: 'Noto Sans';
+  src: url('/fonts/noto/NotoSans-VariableFont_wdth,wght.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Noto Sans Italic';
+  src: url('/fonts/noto/NotoSans-Italic-VariableFont_wdth,wght.ttf')
+    format('truetype');
+  font-weight: 100 900;
+  font-style: italic;
+}
+
+/* Noto Serif */
+@font-face {
+  font-family: 'Noto Serif';
+  src: url('/fonts/noto/NotoSerif-VariableFont_wdth,wght.ttf')
+    format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Noto Serif Italic';
+  src: url('/fonts/noto/NotoSerif-Italic-VariableFont_wdth,wght.ttf')
+    format('truetype');
+  font-weight: 100 900;
+  font-style: italic;
+}
+
+@font-face {
+  font-family: 'Noto Serif SC';
+  src: url('/fonts/noto/NotoSerifSC-VariableFont_wght.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Noto Serif JP';
+  src: url('/fonts/noto/NotoSerifJP-VariableFont_wght.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+}
