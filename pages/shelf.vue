@@ -89,9 +89,6 @@
 
 
 <script setup lang="ts">
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '~/components/ui/tabs'
-import { Button } from '~/components/ui/button'
-
 const itemType = ref<ShelfItemType | undefined>(undefined)
 const shelfType = ref<ShelfType | undefined>(undefined)
 const minRating = ref<number>(0)

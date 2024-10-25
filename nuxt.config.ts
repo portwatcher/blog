@@ -12,7 +12,9 @@ export default defineNuxtConfig({
     'shadcn-nuxt',
   ],
   css: ['@/public/fonts.css'],
-  componentDir: './components/ui',
+  components: {
+    dirs: ['./components/ui'],
+  },
   devServer: {
     host: '0.0.0.0',
   },
