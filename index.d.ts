@@ -7,15 +7,24 @@ interface CategoryInfo {
 
 type ShelfType = 'wishlist' | 'progress' | 'complete'
 
+type ShelfItemType =
+  | 'book'
+  | 'movie'
+  | 'album'
+  | 'game'
+  | 'tv'
+  | 'podcast'
+  | 'performance'
+
 interface ShelfItem {
   title: string
   description: string
   localized_title: {
-    lang: string,
+    lang: string
     text: string
   }[]
   localized_description: {
-    lang: string,
+    lang: string
     text: string
   }[]
   cover_image_url: string
