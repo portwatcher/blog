@@ -14,16 +14,20 @@
     "@nuxt/content": "^2.12.1",
     "@nuxt/image": "^1.7.0",
     "@nuxtjs/i18n": "^8.3.1",
+    "lucide-vue-next": "^0.453.0",
     "nprogress": "^0.2.0",
     "nuxt": "^3.11.2",
     "rehype-mathjax": "^6.0.0",
     "remark-math": "^6.0.0",
     "rss": "^1.2.2",
+    "shadcn-nuxt": "^0.10.4",
+    "tailwindcss-animate": "^1.0.7",
     "v-plausible": "^1.2.0",
     "vue": "^3.4.27",
     "vue-router": "^4.3.2"
   },
   "devDependencies": {
+    "@nuxtjs/tailwindcss": "^6.12.2",
     "@types/nprogress": "^0.2.3",
     "@types/rss": "^0.0.32"
   },

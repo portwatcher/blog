@@ -67,18 +67,8 @@ export class NeoDBService {
   }
 }
 
-const neodb = new NeoDBService()
-
-while (true) {
-  try {
-    await neodb.getAllShelves()
-    await new Promise((resolve) => setTimeout(resolve, 60 * 60 * 1000))
-  } catch (err) {
-    console.error(err)
-  }
-}
-
 export default defineNitroPlugin(async (nitroApp) => {
+  const neodb = new NeoDBService()
   nitroApp.hooks.hook('request', (event) => {
     event.context.neodb = neodb
   })

@@ -1,64 +1,141 @@
 <template>
   <div>
-    <div
-      v-for="(shelf, index) in shelves"
-      :key="index"
-      class="shelf-container"
-    >
-      <h1>{{ $t(`neodb.${shelf.type}`) }}</h1>
-      <div class="shelf">
-        <div v-for="data in shelf.data">
-          <NuxtLink
-            class="item"
-            :to="`https://neodb.social${data.item.url}`"
-            target="_blank"
-          >
-            <NuxtImg :src="data.item.cover_image_url">
-            </NuxtImg>
+    <Tabs v-model="currentItemType">
+      <TabsList>
+        <TabsTrigger
+          v-for="type in itemTypes"
+          :key="type"
+          :value="type"
+        >
+          {{ type }}
+        </TabsTrigger>
+      </TabsList>
 
-            <h3>{{ data.item.title }}</h3>
-          </NuxtLink>
+      <TabsContent
+        v-for="type in itemTypes"
+        :key="type"
+        :value="type"
+      >
+        <div v-if="shelfData">
+          <div class="flex space-x-4 mb-4">
+            <Button
+              v-for="type in shelfTypes"
+              :key="type"
+              @click="handleShelfTypeChange(type)"
+              :class="[
+                'px-3 py-1 rounded',
+                shelfType === type ? 'bg-primary text-primary-foreground' : 'bg-secondary',
+              ]"
+            >
+              {{ type }}
+            </Button>
+          </div>
+
+          <div class="mb-4">
+            <label>Rating: </label>
+            <input
+              type="range"
+              min="0"
+              max="5"
+              step="0.5"
+              v-model="minRating"
+              @change="handleRatingChange(minRating, maxRating)"
+            />
+            <input
+              type="range"
+              min="0"
+              max="5"
+              step="0.5"
+              v-model="maxRating"
+              @change="handleRatingChange(minRating, maxRating)"
+            />
+            <span>{{ minRating }} - {{ maxRating }}</span>
+          </div>
+
+          <div
+            v-for="(items, shelfType) in shelfData.groupedData[type]"
+            :key="shelfType"
+          >
+            <h2 class="text-xl font-semibold mt-4 mb-2">{{ shelfType }}</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div
+                v-for="item in items"
+                :key="item.item.id"
+                class="border p-4 rounded"
+              >
+                <img
+                  :src="item.item.cover_image_url"
+                  :alt="item.item.title"
+                  class="w-full h-40 object-cover mb-2"
+                />
+                <h3 class="font-bold">{{ item.item.title }}</h3>
+                <p>Rating: {{ item.item.rating || 'N/A' }}</p>
+              </div>
+            </div>
+          </div>
+
+          <Button
+            v-if="page < shelfData.totalPages"
+            @click="loadMore"
+            class="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded"
+          >
+            Load More
+          </Button>
         </div>
-      </div>
-    </div>
+      </TabsContent>
+    </Tabs>
   </div>
 </template>
 
 
 <script setup lang="ts">
-interface ShelfResponse {
-  data: ShelfData[]
-  type: ShelfType
-  pages: number
-  count: number
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '~/components/ui/tabs'
+import { Button } from '~/components/ui/button'
+
+const itemType = ref<ShelfItemType | undefined>(undefined)
+const shelfType = ref<ShelfType | undefined>(undefined)
+const minRating = ref<number>(0)
+const maxRating = ref<number>(5)
+const page = ref(1)
+
+const { data: shelfData } = await useFetch('/api/shelves', {
+  query: computed(() => ({
+    itemType: itemType.value,
+    type: shelfType.value,
+    minRating: minRating.value,
+    maxRating: maxRating.value,
+    page: page.value,
+  })),
+})
+
+const itemTypes = computed(() => Object.keys(shelfData.value?.groupedData || {}) as ShelfItemType[])
+
+const currentItemType = computed({
+  get: () => itemType.value || itemTypes.value[0],
+  set: (value) => {
+    itemType.value = value
+    page.value = 1
+  },
+})
+
+const shelfTypes: ShelfType[] = ['wishlist', 'progress', 'complete']
+
+function handleShelfTypeChange(type: ShelfType) {
+  shelfType.value = type === shelfType.value ? undefined : type
+  page.value = 1
 }
 
-const shelves = ref<ShelfResponse[]>([])
+function handleRatingChange(min: number, max: number) {
+  minRating.value = min
+  maxRating.value = max
+  page.value = 1
+}
 
-const getShelf = async function (type: ShelfType, page: number = 1): Promise<ShelfResponse> {
-  const shelf = await $fetch<Shelf>('/api/shelves', {
-    query: {
-      type,
-      page,
-    },
-  })
-
-  return {
-    ...shelf,
-    type,
+function loadMore() {
+  if (page.value < (shelfData.value?.totalPages || 1)) {
+    page.value++
   }
 }
-
-const initShelfs = async function () {
-  const types = ['progress', 'complete', 'wishlist'] as ShelfType[]
-  shelves.value = await Promise.all(
-    types.map((type) => {
-      return getShelf(type, 1)
-    })
-  )
-}
-
-await initShelfs()
 </script>
 
 <style scoped>

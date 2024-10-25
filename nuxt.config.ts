@@ -3,8 +3,16 @@ import { type GiscusProps } from '@giscus/vue'
 
 export default defineNuxtConfig({
   devtools: { enabled: true },
-  modules: ['@nuxt/content', '@nuxtjs/i18n', 'v-plausible', '@nuxt/image'],
+  modules: [
+    '@nuxt/content',
+    '@nuxtjs/i18n',
+    'v-plausible',
+    '@nuxt/image',
+    '@nuxtjs/tailwindcss',
+    'shadcn-nuxt',
+  ],
   css: ['@/public/fonts.css'],
+  componentDir: './components/ui',
   devServer: {
     host: '0.0.0.0',
   },

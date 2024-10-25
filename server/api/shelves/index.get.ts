@@ -71,6 +71,6 @@ export default defineEventHandler(async (event) => {
     page,
     totalPages,
     totalItems,
-    groupedData, // Include the full grouped data structure
+    groupedData,
   }
 })
