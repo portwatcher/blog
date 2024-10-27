@@ -80,8 +80,8 @@ useHead(() => ({
   font-size: 16px;
   position: relative;
   margin: 20px 40px;
-  height: 200px;
-  width: 160px;
+  height: 16em;
+  width: 12em;
   padding: 60px 30px;
 
   &:hover {

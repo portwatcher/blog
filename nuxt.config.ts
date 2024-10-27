@@ -8,12 +8,13 @@ export default defineNuxtConfig({
     '@nuxtjs/i18n',
     'v-plausible',
     '@nuxt/image',
-    '@nuxtjs/tailwindcss',
-    'shadcn-nuxt',
+    '@primevue/nuxt-module',
   ],
   css: ['@/public/fonts.css'],
-  components: {
-    dirs: ['./components/ui'],
+  primevue: {
+    options: {
+      unstyled: true,
+    },
   },
   devServer: {
     host: '0.0.0.0',
@@ -87,4 +88,5 @@ export default defineNuxtConfig({
   i18n: {
     vueI18n: './i18n.config.ts',
   },
+  compatibilityDate: '2024-10-28',
 })

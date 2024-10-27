@@ -1,88 +1,91 @@
 <template>
   <div>
-    <Tabs v-model="currentItemType">
-      <TabsList>
-        <TabsTrigger
+    <Tabs v-model:value="currentItemType">
+      <TabList>
+        <Tab
           v-for="type in itemTypes"
           :key="type"
           :value="type"
         >
           {{ type }}
-        </TabsTrigger>
-      </TabsList>
+        </Tab>
+      </TabList>
 
-      <TabsContent
-        v-for="type in itemTypes"
-        :key="type"
-        :value="type"
-      >
-        <div v-if="shelfData">
-          <div class="flex space-x-4 mb-4">
-            <Button
-              v-for="type in shelfTypes"
-              :key="type"
-              @click="handleShelfTypeChange(type)"
-              :class="[
-                'px-3 py-1 rounded',
-                shelfType === type ? 'bg-primary text-primary-foreground' : 'bg-secondary',
-              ]"
-            >
-              {{ type }}
-            </Button>
-          </div>
-
-          <div class="mb-4">
-            <label>Rating: </label>
-            <input
-              type="range"
-              min="0"
-              max="5"
-              step="0.5"
-              v-model="minRating"
-              @change="handleRatingChange(minRating, maxRating)"
-            />
-            <input
-              type="range"
-              min="0"
-              max="5"
-              step="0.5"
-              v-model="maxRating"
-              @change="handleRatingChange(minRating, maxRating)"
-            />
-            <span>{{ minRating }} - {{ maxRating }}</span>
-          </div>
-
+      <TabPanels>
+        <TabPanel
+          v-for="type in itemTypes"
+          :key="type"
+          :value="type"
+        >
           <div
-            v-for="(items, shelfType) in shelfData.groupedData[type]"
-            :key="shelfType"
+            v-if="shelfData"
+            class="shelf-container"
           >
-            <h2 class="text-xl font-semibold mt-4 mb-2">{{ shelfType }}</h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <div
-                v-for="item in items"
-                :key="item.item.id"
-                class="border p-4 rounded"
+            <div class="shelf-type-buttons">
+              <Button
+                v-for="type in shelfTypes"
+                :key="type"
+                @click="handleShelfTypeChange(type)"
+                :class="[
+                  shelfType === type ? 'active' : '',
+                ]"
               >
-                <img
-                  :src="item.item.cover_image_url"
-                  :alt="item.item.title"
-                  class="w-full h-40 object-cover mb-2"
-                />
-                <h3 class="font-bold">{{ item.item.title }}</h3>
-                <p>Rating: {{ item.item.rating || 'N/A' }}</p>
+                {{ type }}
+              </Button>
+            </div>
+
+            <div class="rating-slider">
+              <label>Rating: </label>
+              <input
+                type="range"
+                min="0"
+                max="5"
+                step="0.5"
+                v-model="minRating"
+                @change="handleRatingChange(minRating, maxRating)"
+              />
+              <input
+                type="range"
+                min="0"
+                max="5"
+                step="0.5"
+                v-model="maxRating"
+                @change="handleRatingChange(minRating, maxRating)"
+              />
+              <span>{{ minRating }} - {{ maxRating }}</span>
+            </div>
+
+            <div
+              v-for="(items, shelfType) in shelfData.groupedData[type]"
+              :key="shelfType"
+            >
+              <h2>{{ shelfType }}</h2>
+              <div class="shelf">
+                <div
+                  v-for="item in items"
+                  :key="item.item.id"
+                  class="item"
+                >
+                  <img
+                    :src="item.item.cover_image_url"
+                    :alt="item.item.title"
+                  />
+                  <h3>{{ item.item.title }}</h3>
+                  <p>Rating: {{ item.item.rating || 'N/A' }}</p>
+                </div>
               </div>
             </div>
-          </div>
 
-          <Button
-            v-if="page < shelfData.totalPages"
-            @click="loadMore"
-            class="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded"
-          >
-            Load More
-          </Button>
-        </div>
-      </TabsContent>
+            <Button
+              v-if="page < shelfData.totalPages"
+              @click="loadMore"
+              class="load-more-button"
+            >
+              Load More
+            </Button>
+          </div>
+        </TabPanel>
+      </TabPanels>
     </Tabs>
   </div>
 </template>
@@ -104,6 +107,8 @@ const { data: shelfData } = await useFetch('/api/shelves', {
     page: page.value,
   })),
 })
+
+console.log(shelfData.value)
 
 const itemTypes = computed(() => Object.keys(shelfData.value?.groupedData || {}) as ShelfItemType[])
 
@@ -182,5 +187,35 @@ function loadMore() {
   -webkit-box-orient: vertical;
   -moz-line-clamp: 3;
   -moz-box-orient: vertical;
+}
+
+.shelf-type-buttons {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.shelf-type-buttons .active {
+  background-color: var(--primary-color);
+  color: var(--primary-foreground-color);
+}
+
+.rating-slider {
+  margin-bottom: 1rem;
+}
+
+.load-more-button {
+  margin-top: 1rem;
+  padding: 0.5rem 1rem;
+  background-color: var(--primary-color);
+  color: var(--primary-foreground-color);
+  border-radius: 0.25rem;
+}
+
+h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
 }
 </style>
