@@ -71,7 +71,7 @@
                     :alt="item.item.title"
                   />
                   <h3>{{ item.item.title }}</h3>
-                  <p>Rating: {{ item.item.rating || 'N/A' }}</p>
+                  <p>Rating: {{ item.item.rating }}</p>
                 </div>
               </div>
             </div>
@@ -92,10 +92,10 @@
 
 
 <script setup lang="ts">
-const itemType = ref<ShelfItemType | undefined>(undefined)
+const itemType = ref<string | undefined>(undefined)
 const shelfType = ref<ShelfType | undefined>(undefined)
 const minRating = ref<number>(0)
-const maxRating = ref<number>(5)
+const maxRating = ref<number>(10)
 const page = ref(1)
 
 const { data: shelfData } = await useFetch('/api/shelves', {
@@ -110,17 +110,17 @@ const { data: shelfData } = await useFetch('/api/shelves', {
 
 console.log(shelfData.value)
 
-const itemTypes = computed(() => Object.keys(shelfData.value?.groupedData || {}) as ShelfItemType[])
+const itemTypes = ['Edition', 'TVSeason', 'Movie']
 
 const currentItemType = computed({
-  get: () => itemType.value || itemTypes.value[0],
+  get: () => itemType.value || itemTypes[0],
   set: (value) => {
     itemType.value = value
     page.value = 1
   },
 })
 
-const shelfTypes: ShelfType[] = ['wishlist', 'progress', 'complete']
+const shelfTypes: ShelfType[] = ['progress', 'complete']
 
 function handleShelfTypeChange(type: ShelfType) {
   shelfType.value = type === shelfType.value ? undefined : type

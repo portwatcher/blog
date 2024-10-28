@@ -1,31 +1,34 @@
-const CACHE_DURATION = 1000 * 60 * 60 * 24 // 24 hours
+const CACHE_DURATION = 1000 * 60 * 60 // 1 hour
 
 interface CacheEntry {
-  data: Shelf
+  data: ShelfResponse
   timestamp: number
 }
 
-export class NeoDBService {
-  private cache: Map<string, CacheEntry> = new Map()
+const cache: Map<string, CacheEntry> = new Map()
 
-  private async fetchShelf(type: ShelfType, page: number): Promise<Shelf> {
-    const config = useRuntimeConfig()
-    const url = new URL(`https://neodb.social/api/me/shelf/${type}`)
-    url.searchParams.append('page', String(page))
+const fetchShelf = async (
+  type: ShelfType,
+  page: number
+): Promise<ShelfResponse> => {
+  const config = useRuntimeConfig()
+  const url = new URL(`https://neodb.social/api/me/shelf/${type}`)
+  url.searchParams.append('page', String(page))
 
-    const res = await fetch(url.toString(), {
-      headers: {
-        Authorization: `Bearer ${config.neodbKey}`,
-      },
-    })
+  const res = await fetch(url.toString(), {
+    headers: {
+      Authorization: `Bearer ${config.neodbKey}`,
+    },
+  })
 
-    if (!res.ok) {
-      throw new Error(`Failed to fetch shelf: ${res.statusText}`)
-    }
-
-    return await res.json()
+  if (!res.ok) {
+    throw new Error(`Failed to fetch shelf: ${res.statusText}`)
   }
 
+  return await res.json()
+}
+
+export class NeoDBService {
   private getCacheKey(type: ShelfType, page: number): string {
     return `${type}-${page}`
   }
@@ -34,32 +37,35 @@ export class NeoDBService {
     return Date.now() - entry.timestamp < CACHE_DURATION
   }
 
-  async getShelf(type: ShelfType, page: number): Promise<Shelf> {
+  async getShelf(type: ShelfType, page: number = 1): Promise<ShelfResponse> {
     const cacheKey = this.getCacheKey(type, page)
-    const cachedEntry = this.cache.get(cacheKey)
+    const cachedEntry = cache.get(cacheKey)
 
     if (cachedEntry && this.isCacheValid(cachedEntry)) {
       return cachedEntry.data
     }
 
-    const freshData = await this.fetchShelf(type, page)
-    this.cache.set(cacheKey, { data: freshData, timestamp: Date.now() })
+    const freshData = await fetchShelf(type, page)
+    cache.set(cacheKey, { data: freshData, timestamp: Date.now() })
     return freshData
   }
 
   async getAllShelves(): Promise<ShelfData[]> {
-    const types: ShelfType[] = ['wishlist', 'progress', 'complete']
+    const types: ShelfType[] = ['progress', 'complete']
     const allData: ShelfData[] = []
 
     for (const type of types) {
-      let page = 1
-      let hasMorePages = true
+      let currentPage = 1
+      let response = await this.getShelf(type, currentPage)
+      console.log(response.data)
+      allData.push(...response.data)
 
-      while (hasMorePages) {
-        const shelf = await this.getShelf(type, page)
-        allData.push(...shelf.data)
-        hasMorePages = page < shelf.pages
-        page++
+      if (process.env.NODE_ENV === 'production') {
+        while (currentPage < response.pages) {
+          currentPage++
+          response = await this.getShelf(type, currentPage)
+          allData.push(...response.data)
+        }
       }
     }
 
@@ -67,7 +73,7 @@ export class NeoDBService {
   }
 }
 
-export default defineNitroPlugin(async (nitroApp) => {
+export default defineNitroPlugin((nitroApp) => {
   const neodb = new NeoDBService()
   nitroApp.hooks.hook('request', (event) => {
     event.context.neodb = neodb

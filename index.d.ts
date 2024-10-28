@@ -1,59 +1,46 @@
-type YearGroupMap = Map<number, ParsedContent[]>
-
-interface CategoryInfo {
-  title: string
-  count: number
-}
-
 type ShelfType = 'wishlist' | 'progress' | 'complete'
 
-type ShelfItemType =
-  | 'book'
-  | 'movie'
-  | 'album'
-  | 'game'
-  | 'tv'
-  | 'podcast'
-  | 'performance'
+interface ExternalResource {
+  url: string
+}
 
 interface ShelfItem {
   title: string
   description: string
-  localized_title: {
-    lang: string
-    text: string
-  }[]
-  localized_description: {
-    lang: string
-    text: string
-  }[]
+  localized_title: any[]
+  localized_description: any[]
   cover_image_url: string
-  rating: null | number
+  rating: number
   rating_count: number
-  brief: string
   id: string
   type: string
   uuid: string
   url: string
   api_url: string
   category: string
-  parent_uuid: null
+  parent_uuid: string | null
   display_title: string
-  external_resources: { url: string }[]
+  external_resources: ExternalResource[]
+}
+
+interface ShelfData {
+  shelf_type: ShelfType
+  visibility: number
+  item: ShelfItem
   created_time: string
   comment_text: string | null
   rating_grade: number | null
   tags: string[]
 }
 
-interface ShelfData {
-  visibility: number
-  shelf_type: ShelfType
-  item: ShelfItem
-}
-
-interface Shelf {
+interface ShelfResponse {
   data: ShelfData[]
   pages: number
   count: number
+}
+
+interface GroupedShelfData {
+  [category: string]: {
+    [shelfType in ShelfType]?: ShelfData[]
+  }
 }

@@ -5,9 +5,9 @@ const ITEMS_PER_PAGE = 20
 export default defineEventHandler(async (event) => {
   const query = getQuery(event)
   const type = query.type as ShelfType | undefined
-  const itemType = query.itemType as ShelfItemType | undefined
+  const itemType = query.itemType as string | undefined
   const minRating = Number(query.minRating) || 0
-  const maxRating = Number(query.maxRating) || 5
+  const maxRating = Number(query.maxRating) || 10
   const page = Number(query.page) || 1
 
   const neodb: NeoDBService = event.context.neodb
@@ -30,7 +30,7 @@ export default defineEventHandler(async (event) => {
 
   // Group by ShelfItemType, then by ShelfType
   const groupedData = filteredData.reduce((acc, item) => {
-    const itemType = item.item.type as ShelfItemType
+    const itemType = item.item.type as string
     const shelfType = item.shelf_type
 
     if (!acc[itemType]) {
@@ -41,7 +41,7 @@ export default defineEventHandler(async (event) => {
     }
     acc[itemType][shelfType].push(item)
     return acc
-  }, {} as Record<ShelfItemType, Record<ShelfType, ShelfData[]>>)
+  }, {} as Record<string, Record<ShelfType, ShelfData[]>>)
 
   // Sort each group by rating (descending)
   Object.values(groupedData).forEach((itemTypeGroup) => {
