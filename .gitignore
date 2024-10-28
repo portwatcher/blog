@@ -27,3 +27,5 @@ logs
 */content/*
 content/*
 !.gitkeep
+
+build.sh
