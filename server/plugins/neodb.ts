@@ -34,7 +34,7 @@ const fetchShelf = async (
 }
 
 const getAllShelves = async (): Promise<ShelfData[]> => {
-  const types: ShelfType[] = ['progress', 'complete']
+  const types: ShelfType[] = ['complete', 'progress']
   const allData: ShelfData[] = []
 
   for (const type of types) {
@@ -42,13 +42,13 @@ const getAllShelves = async (): Promise<ShelfData[]> => {
     let response = await fetchShelf(type, currentPage)
     allData.push(...response.data)
 
-    if (process.env.NODE_ENV === 'production') {
-      while (currentPage < response.pages) {
-        currentPage++
-        response = await fetchShelf(type, currentPage)
-        allData.push(...response.data)
-      }
+    // if (process.env.NODE_ENV === 'production') {
+    while (currentPage < response.pages) {
+      currentPage++
+      response = await fetchShelf(type, currentPage)
+      allData.push(...response.data)
     }
+    // }
   }
 
   return allData

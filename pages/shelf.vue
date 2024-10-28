@@ -7,7 +7,7 @@
           :key="type"
           :value="type"
         >
-          {{ type }}
+          {{ $t(`${type}`) }}
         </Tab>
       </TabList>
 
@@ -21,69 +21,54 @@
             v-if="shelfData"
             class="shelf-container"
           >
-            <div class="shelf-type-buttons">
-              <Button
-                v-for="type in shelfTypes"
-                :key="type"
-                @click="shelfType = type"
-                :class="[
-                  shelfType === type ? 'active' : '',
-                ]"
-              >
-                {{ type }}
-              </Button>
-            </div>
+            <div style="display: flex; gap: 3rem; align-items: center; margin-bottom: 3rem; margin-top: 1rem;">
+              <Rating v-model="rating"></Rating>
 
-            <div class="rating-slider">
-              <label>Rating: </label>
-              <input
-                type="range"
-                min="0"
-                max="5"
-                step="0.5"
-                v-model="minRating"
-                @change="handleRatingChange(minRating, maxRating)"
-              />
-              <input
-                type="range"
-                min="0"
-                max="5"
-                step="0.5"
-                v-model="maxRating"
-                @change="handleRatingChange(minRating, maxRating)"
-              />
-              <span>{{ minRating }} - {{ maxRating }}</span>
-            </div>
-
-            <div
-              v-for="(items, shelfType) in shelfData?.[type]"
-              :key="shelfType"
-            >
-              <h2>{{ shelfType }}</h2>
-              <div class="shelf">
-                <a
-                  v-for="item in items"
-                  :key="item.item.uuid"
-                  class="item"
-                  :href="item.item.id"
-                  target="_blank"
+              <div style="display: flex; gap: 1rem;">
+                <div
+                  v-for="iterShelfType in shelfTypes"
+                  :key="iterShelfType"
+                  style="display: flex; align-items: center; gap: 0.5rem;"
                 >
-                  <img
-                    :src="item.item.cover_image_url"
-                    :alt="item.item.title"
+                  <RadioButton
+                    v-model="shelfType"
+                    :value="iterShelfType"
                   />
-                  <h3>{{ item.item.title }}</h3>
-                </a>
+                  <label :for="iterShelfType">{{ $t(`neodb.${iterShelfType}`) }}</label>
+                </div>
               </div>
             </div>
 
-            <Button
-              v-if="page < totalPages"
-              @click="loadMore"
-              class="load-more-button"
-            >
-              Load More
-            </Button>
+            <div style="display: flex; flex-direction: column; gap: 1rem;">
+              <div
+                v-for="(items, shelfType) in shelfData?.[type]"
+                :key="shelfType"
+              >
+                <div class="shelf">
+                  <a
+                    v-for="item in items"
+                    :key="item.item.uuid"
+                    class="item"
+                    :href="item.item.id"
+                    target="_blank"
+                  >
+                    <img
+                      :src="item.item.cover_image_url"
+                      :alt="item.item.title"
+                    />
+                    <h3>{{ item.item.title }}</h3>
+                    <span>{{ $d(new Date(item.created_time), 'short') }}</span>
+                  </a>
+                </div>
+              </div>
+
+              <Paginator
+                v-if="total > itemsPerPage"
+                :rows="itemsPerPage"
+                :total-records="total"
+                @page="$event => page = $event.page + 1"
+              />
+            </div>
           </div>
         </TabPanel>
       </TabPanels>
@@ -98,6 +83,7 @@ const shelfTypes: ShelfType[] = ['complete', 'progress']
 
 const itemType = ref<string>(itemTypes[0])
 const shelfType = ref<ShelfType>(shelfTypes[0])
+const rating = ref<number>(5)
 const minRating = ref<number>(9)
 const maxRating = ref<number>(10)
 const page = ref(1)
@@ -114,27 +100,21 @@ const { data } = await useFetch('/api/shelves', {
 
 const shelfData = computed(() => data.value?.groupedData)
 const total = computed(() => data.value?.total)
-const totalPages = computed(() => Math.ceil(total.value ?? 0 / ITEMS_PER_PAGE))
+const itemsPerPage = ITEMS_PER_PAGE
 
 watch(itemType, () => {
   page.value = 1
+  shelfType.value = shelfTypes[0]
 })
 
 watch(shelfType, () => {
   page.value = 1
 })
 
-const handleRatingChange = (min: number, max: number) => {
-  minRating.value = min
-  maxRating.value = max
-  page.value = 1
-}
-
-const loadMore = () => {
-  if (page.value < totalPages.value) {
-    page.value++
-  }
-}
+watch(rating, () => {
+  minRating.value = rating.value * 2 - 1
+  maxRating.value = rating.value * 2
+})
 </script>
 
 <style scoped>
@@ -186,27 +166,9 @@ const loadMore = () => {
   -moz-box-orient: vertical;
 }
 
-.shelf-type-buttons {
-  display: flex;
-  gap: 1rem;
-  margin-bottom: 1rem;
-}
-
-.shelf-type-buttons .active {
-  background-color: var(--primary-color);
-  color: var(--primary-foreground-color);
-}
-
-.rating-slider {
-  margin-bottom: 1rem;
-}
-
-.load-more-button {
-  margin-top: 1rem;
-  padding: 0.5rem 1rem;
-  background-color: var(--primary-color);
-  color: var(--primary-foreground-color);
-  border-radius: 0.25rem;
+.item span {
+  font-size: 0.8rem;
+  margin-top: -0.5rem;
 }
 
 h2 {

@@ -1,4 +1,58 @@
 export default defineI18nConfig(() => ({
+  datetimeFormats: {
+    'en-US': {
+      short: {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      },
+      long: {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        weekday: 'short',
+        hour: 'numeric',
+        minute: 'numeric',
+      },
+    },
+    'ja-JP': {
+      short: {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      },
+      long: {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        weekday: 'short',
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: true,
+      },
+    },
+    'zh-CN': {
+      short: {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      },
+    },
+    'zh-TW': {
+      short: {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      },
+    },
+    'zh-HK': {
+      short: {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      },
+    },
+  },
   messages: {
     en: {
       home: 'Home',
@@ -10,6 +64,10 @@ export default defineI18nConfig(() => ({
         progress: 'Enjoying',
       },
       shelf: 'Shelf',
+      book: 'Books',
+      tv: 'Dramas',
+      movie: 'Movies',
+      loadMore: 'Load More',
     },
     zh: {
       home: '首页',
@@ -21,6 +79,10 @@ export default defineI18nConfig(() => ({
         progress: '正在看',
       },
       shelf: '书单',
+      book: '书',
+      tv: '剧',
+      movie: '影',
+      loadMore: '更多',
     },
     ja: {
       home: 'トップ',
@@ -32,6 +94,10 @@ export default defineI18nConfig(() => ({
         progress: '観てる',
       },
       shelf: '本棚',
+      book: '本',
+      tv: '番組',
+      movie: '映画',
+      loadMore: 'さらに',
     },
   },
   fallbackLocale: 'en',
