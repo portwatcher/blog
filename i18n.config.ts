@@ -1,6 +1,6 @@
 export default defineI18nConfig(() => ({
   datetimeFormats: {
-    'en-US': {
+    en: {
       short: {
         year: 'numeric',
         month: 'short',
@@ -15,7 +15,7 @@ export default defineI18nConfig(() => ({
         minute: 'numeric',
       },
     },
-    'ja-JP': {
+    ja: {
       short: {
         year: 'numeric',
         month: 'short',
@@ -31,21 +31,7 @@ export default defineI18nConfig(() => ({
         hour12: true,
       },
     },
-    'zh-CN': {
-      short: {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-      },
-    },
-    'zh-TW': {
-      short: {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-      },
-    },
-    'zh-HK': {
+    zh: {
       short: {
         year: 'numeric',
         month: 'short',
