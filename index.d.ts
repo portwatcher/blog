@@ -1,5 +1,9 @@
 type ShelfType = 'wishlist' | 'progress' | 'complete'
 
+type ShelfCategory = string
+
+type ShelfItemUUID = string
+
 interface ExternalResource {
   url: string
 }
@@ -14,11 +18,11 @@ interface ShelfItem {
   rating_count: number
   id: string
   type: string
-  uuid: string
+  uuid: ShelfItemUUID
   url: string
   api_url: string
-  category: string
-  parent_uuid: string | null
+  category: ShelfCategory
+  parent_uuid: ShelfItemUUID | null
   display_title: string
   external_resources: ExternalResource[]
 }

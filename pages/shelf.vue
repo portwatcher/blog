@@ -1,6 +1,6 @@
 <template>
   <div>
-    <Tabs v-model:value="currentItemType">
+    <Tabs v-model:value="itemType">
       <TabList>
         <Tab
           v-for="type in itemTypes"
@@ -25,7 +25,7 @@
               <Button
                 v-for="type in shelfTypes"
                 :key="type"
-                @click="handleShelfTypeChange(type)"
+                @click="shelfType = type"
                 :class="[
                   shelfType === type ? 'active' : '',
                 ]"
@@ -56,28 +56,29 @@
             </div>
 
             <div
-              v-for="(items, shelfType) in shelfData.groupedData[type]"
+              v-for="(items, shelfType) in shelfData?.[type]"
               :key="shelfType"
             >
               <h2>{{ shelfType }}</h2>
               <div class="shelf">
-                <div
+                <a
                   v-for="item in items"
-                  :key="item.item.id"
+                  :key="item.item.uuid"
                   class="item"
+                  :href="item.item.id"
+                  target="_blank"
                 >
                   <img
                     :src="item.item.cover_image_url"
                     :alt="item.item.title"
                   />
                   <h3>{{ item.item.title }}</h3>
-                  <p>Rating: {{ item.item.rating }}</p>
-                </div>
+                </a>
               </div>
             </div>
 
             <Button
-              v-if="page < shelfData.totalPages"
+              v-if="page < totalPages"
               @click="loadMore"
               class="load-more-button"
             >
@@ -92,49 +93,45 @@
 
 
 <script setup lang="ts">
-const itemType = ref<string | undefined>(undefined)
-const shelfType = ref<ShelfType | undefined>(undefined)
-const minRating = ref<number>(0)
+const itemTypes = ['book', 'tv', 'movie']
+const shelfTypes: ShelfType[] = ['complete', 'progress']
+
+const itemType = ref<string>(itemTypes[0])
+const shelfType = ref<ShelfType>(shelfTypes[0])
+const minRating = ref<number>(9)
 const maxRating = ref<number>(10)
 const page = ref(1)
 
-const { data: shelfData } = await useFetch('/api/shelves', {
+const { data } = await useFetch('/api/shelves', {
   query: computed(() => ({
-    itemType: itemType.value,
     type: shelfType.value,
+    category: itemType.value,
     minRating: minRating.value,
     maxRating: maxRating.value,
     page: page.value,
   })),
 })
 
-console.log(shelfData.value)
+const shelfData = computed(() => data.value?.groupedData)
+const total = computed(() => data.value?.total)
+const totalPages = computed(() => Math.ceil(total.value ?? 0 / ITEMS_PER_PAGE))
 
-const itemTypes = ['Edition', 'TVSeason', 'Movie']
-
-const currentItemType = computed({
-  get: () => itemType.value || itemTypes[0],
-  set: (value) => {
-    itemType.value = value
-    page.value = 1
-  },
+watch(itemType, () => {
+  page.value = 1
 })
 
-const shelfTypes: ShelfType[] = ['progress', 'complete']
-
-function handleShelfTypeChange(type: ShelfType) {
-  shelfType.value = type === shelfType.value ? undefined : type
+watch(shelfType, () => {
   page.value = 1
-}
+})
 
-function handleRatingChange(min: number, max: number) {
+const handleRatingChange = (min: number, max: number) => {
   minRating.value = min
   maxRating.value = max
   page.value = 1
 }
 
-function loadMore() {
-  if (page.value < (shelfData.value?.totalPages || 1)) {
+const loadMore = () => {
+  if (page.value < totalPages.value) {
     page.value++
   }
 }

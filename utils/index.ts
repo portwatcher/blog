@@ -3,3 +3,5 @@ export const capitalize = function (str: string) {
     return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()
   })
 }
+
+export const ITEMS_PER_PAGE = 20

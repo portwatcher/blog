@@ -1,11 +1,16 @@
-const CACHE_DURATION = 1000 * 60 * 60 // 1 hour
+const CACHE_DURATION = 1000 * 60 * 60 * 1 // 1 hours
+const cache: Map<ShelfItemUUID, ShelfData> = new Map()
 
-interface CacheEntry {
-  data: ShelfResponse
-  timestamp: number
+interface Query {
+  category?: ShelfCategory
+  type?: ShelfType
+  maxRating?: number
+  minRating?: number
+  page?: number
+  limit?: number
 }
 
-const cache: Map<string, CacheEntry> = new Map()
+let cachedAt = 0
 
 const fetchShelf = async (
   type: ShelfType,
@@ -28,53 +33,110 @@ const fetchShelf = async (
   return await res.json()
 }
 
-export class NeoDBService {
-  private getCacheKey(type: ShelfType, page: number): string {
-    return `${type}-${page}`
-  }
+const getAllShelves = async (): Promise<ShelfData[]> => {
+  const types: ShelfType[] = ['progress', 'complete']
+  const allData: ShelfData[] = []
 
-  private isCacheValid(entry: CacheEntry): boolean {
-    return Date.now() - entry.timestamp < CACHE_DURATION
-  }
+  for (const type of types) {
+    let currentPage = 1
+    let response = await fetchShelf(type, currentPage)
+    allData.push(...response.data)
 
-  async getShelf(type: ShelfType, page: number = 1): Promise<ShelfResponse> {
-    const cacheKey = this.getCacheKey(type, page)
-    const cachedEntry = cache.get(cacheKey)
-
-    if (cachedEntry && this.isCacheValid(cachedEntry)) {
-      return cachedEntry.data
+    if (process.env.NODE_ENV === 'production') {
+      while (currentPage < response.pages) {
+        currentPage++
+        response = await fetchShelf(type, currentPage)
+        allData.push(...response.data)
+      }
     }
-
-    const freshData = await fetchShelf(type, page)
-    cache.set(cacheKey, { data: freshData, timestamp: Date.now() })
-    return freshData
   }
 
-  async getAllShelves(): Promise<ShelfData[]> {
-    const types: ShelfType[] = ['progress', 'complete']
-    const allData: ShelfData[] = []
+  return allData
+}
 
-    for (const type of types) {
-      let currentPage = 1
-      let response = await this.getShelf(type, currentPage)
-      console.log(response.data)
-      allData.push(...response.data)
+const scrap = async () => {
+  const datas = await getAllShelves()
+  for (const data of datas) {
+    cache.set(data.item.uuid, data)
+  }
+  cachedAt = Date.now()
+}
 
-      if (process.env.NODE_ENV === 'production') {
-        while (currentPage < response.pages) {
-          currentPage++
-          response = await this.getShelf(type, currentPage)
-          allData.push(...response.data)
+export class NeoDBService {
+  async scrapIfNeeded() {
+    try {
+      if (cachedAt === 0) {
+        await scrap()
+      }
+      if (cachedAt + CACHE_DURATION < Date.now()) {
+        scrap()
+      }
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  async getOne(uuid: ShelfItemUUID): Promise<ShelfData | null> {
+    await this.scrapIfNeeded()
+    return cache.get(uuid) || null
+  }
+
+  async query(query: Query): Promise<{ data: ShelfData[]; total: number }> {
+    await this.scrapIfNeeded()
+
+    const filteredItems = Array.from(cache.values()).filter((item) => {
+      if (query.category && item.item.category !== query.category) {
+        return false
+      }
+
+      if (query.type && item.shelf_type !== query.type) {
+        return false
+      }
+
+      if (query.maxRating || query.minRating) {
+        if (item.rating_grade === null) {
+          return false
         }
+      }
+
+      if (
+        query.maxRating &&
+        item.rating_grade &&
+        item.rating_grade > query.maxRating
+      ) {
+        return false
+      }
+
+      if (
+        query.minRating &&
+        item.rating_grade &&
+        item.rating_grade < query.minRating
+      ) {
+        return false
+      }
+
+      return true
+    })
+
+    if (query.page && query.limit) {
+      const start = (query.page - 1) * query.limit
+      const end = start + query.limit
+      return {
+        data: filteredItems.slice(start, end),
+        total: filteredItems.length,
       }
     }
 
-    return allData
+    return {
+      data: filteredItems,
+      total: filteredItems.length,
+    }
   }
 }
 
 export default defineNitroPlugin((nitroApp) => {
   const neodb = new NeoDBService()
+  neodb.scrapIfNeeded()
   nitroApp.hooks.hook('request', (event) => {
     event.context.neodb = neodb
   })
