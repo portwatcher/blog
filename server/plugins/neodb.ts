@@ -42,13 +42,13 @@ const getAllShelves = async (): Promise<ShelfData[]> => {
     let response = await fetchShelf(type, currentPage)
     allData.push(...response.data)
 
-    // if (process.env.NODE_ENV === 'production') {
-    while (currentPage < response.pages) {
-      currentPage++
-      response = await fetchShelf(type, currentPage)
-      allData.push(...response.data)
+    if (process.env.NODE_ENV === 'production') {
+      while (currentPage < response.pages) {
+        currentPage++
+        response = await fetchShelf(type, currentPage)
+        allData.push(...response.data)
+      }
     }
-    // }
   }
 
   return allData
@@ -93,26 +93,28 @@ export class NeoDBService {
         return false
       }
 
-      if (query.maxRating || query.minRating) {
-        if (item.rating_grade === null) {
+      if (query.type === 'complete') {
+        if (query.maxRating || query.minRating) {
+          if (item.rating_grade === null) {
+            return false
+          }
+        }
+
+        if (
+          query.maxRating &&
+          item.rating_grade &&
+          item.rating_grade > query.maxRating
+        ) {
           return false
         }
-      }
 
-      if (
-        query.maxRating &&
-        item.rating_grade &&
-        item.rating_grade > query.maxRating
-      ) {
-        return false
-      }
-
-      if (
-        query.minRating &&
-        item.rating_grade &&
-        item.rating_grade < query.minRating
-      ) {
-        return false
+        if (
+          query.minRating &&
+          item.rating_grade &&
+          item.rating_grade < query.minRating
+        ) {
+          return false
+        }
       }
 
       return true
