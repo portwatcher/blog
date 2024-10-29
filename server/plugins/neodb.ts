@@ -11,6 +11,7 @@ interface Query {
 }
 
 let cachedAt = 0
+let scheduled = false
 
 const fetchShelf = async (
   type: ShelfType,
@@ -71,9 +72,18 @@ export class NeoDBService {
       if (cachedAt + CACHE_DURATION < Date.now()) {
         scrap()
       }
+      if (!scheduled) {
+        this.schedule()
+      }
     } catch (err) {
       console.error(err)
     }
+  }
+
+  schedule() {
+    scheduled = true
+    this.scrapIfNeeded()
+    setTimeout(this.schedule, CACHE_DURATION)
   }
 
   async getOne(uuid: ShelfItemUUID): Promise<ShelfData | null> {
@@ -147,13 +157,6 @@ export class NeoDBService {
 
 export default defineNitroPlugin((nitroApp) => {
   const neodb = new NeoDBService()
-  const schedule = () => {
-    setTimeout(() => {
-      neodb.scrapIfNeeded()
-      schedule()
-    }, CACHE_DURATION)
-  }
-  schedule()
   nitroApp.hooks.hook('request', (event) => {
     event.context.neodb = neodb
   })
