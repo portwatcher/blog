@@ -21,7 +21,7 @@
             v-if="shelfData"
             class="shelf-container"
           >
-            <div style="display: flex; gap: 3rem; align-items: center; margin-bottom: 3rem; margin-top: 1rem;">
+            <div style="display: flex; gap: 1.5rem; align-items: center; margin-bottom: 3rem; margin-top: 1rem;">
               <Rating v-model="rating"></Rating>
 
               <div style="display: flex; gap: 1rem;">

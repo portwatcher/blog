@@ -120,6 +120,15 @@ export class NeoDBService {
       return true
     })
 
+    if (query.type === 'complete') {
+      filteredItems.sort((a, b) => {
+        return (
+          new Date(b.created_time).getTime() -
+          new Date(a.created_time).getTime()
+        )
+      })
+    }
+
     if (query.page && query.limit) {
       const start = (query.page - 1) * query.limit
       const end = start + query.limit
