@@ -34,7 +34,7 @@ const fetchShelf = async (
 }
 
 const getAllShelves = async (): Promise<ShelfData[]> => {
-  const types: ShelfType[] = ['complete', 'progress']
+  const types: ShelfType[] = ['complete', 'progress', 'wishlist']
   const allData: ShelfData[] = []
 
   for (const type of types) {
@@ -147,7 +147,13 @@ export class NeoDBService {
 
 export default defineNitroPlugin((nitroApp) => {
   const neodb = new NeoDBService()
-  neodb.scrapIfNeeded()
+  const schedule = () => {
+    setTimeout(() => {
+      neodb.scrapIfNeeded()
+      schedule()
+    }, CACHE_DURATION)
+  }
+  schedule()
   nitroApp.hooks.hook('request', (event) => {
     event.context.neodb = neodb
   })

@@ -79,7 +79,7 @@
 
 <script setup lang="ts">
 const itemTypes = ['book', 'tv', 'movie']
-const shelfTypes: ShelfType[] = ['complete', 'progress']
+const shelfTypes: ShelfType[] = ['complete', 'progress', 'wishlist']
 
 const itemType = ref<string>(itemTypes[0])
 const shelfType = ref<ShelfType>(shelfTypes[0])
