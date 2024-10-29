@@ -21,14 +21,13 @@
             v-if="shelfData"
             class="shelf-container"
           >
-            <div style="display: flex; gap: 1.5rem; align-items: center; margin-bottom: 3rem; margin-top: 1rem;">
+            <div class="option-container">
               <Rating v-model="rating"></Rating>
 
-              <div style="display: flex; gap: 1rem;">
+              <div class="radios">
                 <div
                   v-for="iterShelfType in shelfTypes"
                   :key="iterShelfType"
-                  style="display: flex; align-items: center; gap: 0.5rem;"
                 >
                   <RadioButton
                     v-model="shelfType"
@@ -176,5 +175,42 @@ h2 {
   font-weight: 600;
   margin-top: 1rem;
   margin-bottom: 0.5rem;
+}
+
+.option-container {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 3rem;
+  margin-top: 1rem;
+}
+
+.radios {
+  display: flex;
+  gap: 0.7rem;
+}
+
+.radios>div {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.radios label {
+  white-space: nowrap;
+}
+
+@media only screen and (min-width: 600px) {
+  .option-container {
+    gap: 1.5rem;
+  }
+
+  .radios {
+    gap: 1rem;
+  }
+
+  .radios>div {
+    gap: 0.5rem;
+  }
 }
 </style>
