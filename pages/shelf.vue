@@ -179,38 +179,33 @@ h2 {
 
 .option-container {
   display: flex;
-  gap: 1rem;
-  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2rem;
   margin-bottom: 3rem;
   margin-top: 1rem;
 }
 
+@media only screen and (min-width: 600px) {
+  .option-container {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+  }
+}
+
 .radios {
   display: flex;
-  gap: 0.7rem;
+  gap: 1rem;
 }
 
 .radios>div {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.5rem;
 }
 
 .radios label {
   white-space: nowrap;
-}
-
-@media only screen and (min-width: 600px) {
-  .option-container {
-    gap: 1.5rem;
-  }
-
-  .radios {
-    gap: 1rem;
-  }
-
-  .radios>div {
-    gap: 0.5rem;
-  }
 }
 </style>
