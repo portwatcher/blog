@@ -7,10 +7,13 @@
 <script setup lang="ts">
 const { setLocale } = useI18n()
 
-if (import.meta.client) {
-  const locale = navigator.language.slice(0, 2).toLowerCase()
-  setLocale(locale)
-}
+const locale = import.meta.client
+  ? navigator.language.slice(0, 2).toLowerCase()
+  : useRequestHeaders(['accept-language'])
+    ?.['accept-language']?.slice(0, 2)
+    .toLowerCase() || 'en'
+
+setLocale(locale)
 </script>
 
 <style>
