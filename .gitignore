@@ -29,3 +29,4 @@ content/*
 !.gitkeep
 
 build.sh
+content_imgs
