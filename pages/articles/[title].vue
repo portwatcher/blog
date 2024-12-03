@@ -118,8 +118,19 @@ const unlock = async function () {
 }
 
 .post video {
+  margin: 1rem;
   margin-left: auto;
   margin-right: auto;
+  max-width: 100%;
+  max-height: 40rem;
+  display: block;
+}
+
+.post audio {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+  margin: 1rem;
 }
 
 .post img {
