@@ -24,6 +24,7 @@ const BlogPreset = definePreset(Aura, {
 export default defineNuxtConfig({
   devtools: { enabled: true },
   modules: [
+    'nuxt-content-assets',
     '@nuxt/content',
     '@nuxtjs/i18n',
     'v-plausible',
