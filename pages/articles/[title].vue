@@ -217,6 +217,8 @@ const unlock = async function () {
   background-color: #eee;
   border-top-right-radius: 0.5rem;
   border-bottom-right-radius: 0.5rem;
+  margin-top: 3em;
+  margin-bottom: 3em;
 }
 
 .markdown pre {
