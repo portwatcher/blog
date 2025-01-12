@@ -19,6 +19,9 @@ const yearGroupMap: YearGroupMap = new Map()
 
 data.value?.forEach((article) => {
   const year = new Date(article.date).getFullYear()
+  if (isNaN(year)) {
+    return
+  }
   if (!yearGroupMap.has(year)) {
     yearGroupMap.set(year, [article])
   } else {
