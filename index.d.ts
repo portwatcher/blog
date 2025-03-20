@@ -48,3 +48,10 @@ interface GroupedShelfData {
     [shelfType in ShelfType]?: ShelfData[]
   }
 }
+
+type YearGroupMap = Map<number, ParsedContent[]>
+
+interface CategoryInfo {
+  title: string
+  count: number
+}

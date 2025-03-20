@@ -12,6 +12,7 @@
 import type { ParsedContent } from '@nuxt/content/types'
 
 const config = useRuntimeConfig()
+const { t } = useI18n()
 
 const { data } = await useFetch<ParsedContent[]>('/api/articles')
 
@@ -30,8 +31,8 @@ data.value?.forEach((article) => {
 })
 
 useSeoMeta({
-  title: 'Archive',
-  ogUrl: `${config.public.host}/archive`,
+  title: t('archive'),
+  ogUrl: new URL('/archive', config.public.host).toString(),
   twitterCard: 'summary',
 })
 </script>

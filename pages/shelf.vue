@@ -62,7 +62,7 @@
               </div>
 
               <Paginator
-                v-if="total > itemsPerPage"
+                v-if="total && total > itemsPerPage"
                 :rows="itemsPerPage"
                 :total-records="total"
                 @page="$event => page = $event.page + 1"
@@ -86,6 +86,14 @@ const rating = ref<number>(5)
 const minRating = ref<number>(9)
 const maxRating = ref<number>(10)
 const page = ref(1)
+const { t } = useI18n()
+const config = useRuntimeConfig()
+
+useSeoMeta({
+  title: t('shelf'),
+  ogUrl: new URL('/shelf', config.public.host).toString(),
+  twitterCard: 'summary',
+})
 
 const { data } = await useFetch('/api/shelves', {
   query: computed(() => ({
