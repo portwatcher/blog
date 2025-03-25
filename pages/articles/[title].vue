@@ -233,6 +233,7 @@ const unlock = async function () {
 
 .markdown h1 {
   margin: 2.5em 0 1.5em 0;
+  line-height: 1.2;
 }
 
 .markdown h2 {
