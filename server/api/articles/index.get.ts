@@ -31,7 +31,12 @@ export default defineEventHandler(async (event) => {
     queryBuilder.where({ status: String(query.status) })
   }
   if (query.only) {
-    queryBuilder.only(query.only as string[])
+    const fields = Array.isArray(query.only)
+      ? (query.only as string[])
+      : String(query.only).split(',')
+    if (!fields.includes('status')) fields.push('status')
+    // Avoid sending body in listings by default; consumers can explicitly request it
+    queryBuilder.only(fields)
   }
 
   const docs = await queryBuilder.find()
@@ -141,5 +146,13 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  return docs
+  // Listing queries: never include body; mask private descriptions
+  const safeDocs = docs.map((d: any) => {
+    const { body, ...rest } = d || {}
+    if (rest?.status === 'private') {
+      return { ...rest, description: 'This article is private' }
+    }
+    return rest
+  })
+  return safeDocs
 })
