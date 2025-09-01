@@ -29,7 +29,6 @@ export default defineNuxtConfig({
     '@nuxtjs/i18n',
     '@nuxt/image',
     '@primevue/nuxt-module',
-    'nuxt-umami',
   ],
   css: ['@/public/fonts.css'],
   primevue: {
@@ -84,11 +83,6 @@ export default defineNuxtConfig({
     },
   },
   $development: {
-    umami: {
-      id: 'your-website-id',
-      host: 'https://your-umami-host',
-      autoTrack: true,
-    },
     runtimeConfig: {
       password: 'password',
       neodbKey: '',

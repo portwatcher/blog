@@ -34,25 +34,37 @@ export default defineEventHandler(async (event) => {
     }
 
     if (doc.status === 'public') {
+      // Return as-is for public articles
       return [doc]
     } else if (doc.status === 'private') {
+      // Never mutate the original cached doc object; return a modified copy
       if (query.password !== config.password) {
-        if (doc.body) {
-          doc.body.children = [
+        const lockedBody = {
+          type: 'root',
+          children: [
             {
               type: 'element',
               tag: 'p',
-              children: [
-                { type: 'text', value: 'This article is private' },
-              ],
+              children: [{ type: 'text', value: 'This article is private' }],
             },
-          ]
+          ],
         }
-        doc.description = 'This article is private'
+        return [
+          {
+            ...doc,
+            body: lockedBody,
+            description: 'This article is private',
+            authenticated: false,
+          },
+        ]
       } else {
-        doc.authenticated = true
+        return [
+          {
+            ...doc,
+            authenticated: true,
+          },
+        ]
       }
-      return [doc]
     }
   }
 

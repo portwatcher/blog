@@ -14,7 +14,6 @@ I do this because Farbox is not longer updated and maintained, but my blog needs
 - i18n
 - Archive group by year
 - giscus comment system
-- umami analytics
 - neodb.social collections
 
 ## Setup
