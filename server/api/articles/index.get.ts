@@ -43,11 +43,12 @@ export default defineEventHandler(async (event) => {
               type: 'element',
               tag: 'p',
               children: [
-                { type: 'text', value: 'This article is currently private' },
+                { type: 'text', value: 'This article is private' },
               ],
             },
           ]
         }
+        doc.description = 'This article is private'
       } else {
         doc.authenticated = true
       }
