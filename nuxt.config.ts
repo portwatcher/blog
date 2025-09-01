@@ -27,9 +27,9 @@ export default defineNuxtConfig({
     'nuxt-content-assets',
     '@nuxt/content',
     '@nuxtjs/i18n',
-    'v-plausible',
     '@nuxt/image',
     '@primevue/nuxt-module',
+    'nuxt-umami',
   ],
   css: ['@/public/fonts.css'],
   primevue: {
@@ -84,11 +84,10 @@ export default defineNuxtConfig({
     },
   },
   $development: {
-    plausible: {
-      init: {
-        domain: 'localhost',
-        apiHost: 'https://plausible.io',
-      },
+    umami: {
+      id: 'your-website-id',
+      host: 'https://your-umami-host',
+      autoTrack: true,
     },
     runtimeConfig: {
       password: 'password',
