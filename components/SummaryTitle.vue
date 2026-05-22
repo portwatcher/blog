@@ -8,11 +8,8 @@
 </template>
 
 <script setup lang="ts">
-import { type ParsedContent } from '@nuxt/content/types'
-
-
 defineProps<{
-  article: ParsedContent
+  article: Article
 }>()
 </script>
 

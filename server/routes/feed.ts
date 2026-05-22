@@ -1,13 +1,17 @@
 import RSS from 'rss'
-import { serverQueryContent } from '#content/server'
+import { queryCollection } from '@nuxt/content/server'
+
+const getArticleCategory = (article: { category?: string, path: string }) => {
+  return article.category || article.path.split('/').filter(Boolean)[0] || ''
+}
 
 export default defineEventHandler(async (event) => {
   try {
     const config = useRuntimeConfig(event)
-    const articles = await serverQueryContent(event)
-      .where({ status: { $eq: 'public' } })
-      .sort({ date: -1 })
-      .find()
+    const articles = await queryCollection(event, 'articles')
+      .where('status', '=', 'public')
+      .order('date', 'DESC')
+      .all()
 
     const feed = new RSS({
       title: 'Rafael Magalhaes',
@@ -21,9 +25,9 @@ export default defineEventHandler(async (event) => {
         url: `${config.public.host}/articles/${encodeURIComponent(
           String(article.title)
         )}`,
-        description: article.description,
-        date: article.date,
-        categories: [article._dir],
+        description: article.description || '',
+        date: String(article.date),
+        categories: [getArticleCategory(article)],
       })
     }
 

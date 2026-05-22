@@ -24,7 +24,6 @@ const BlogPreset = definePreset(Aura, {
 export default defineNuxtConfig({
   devtools: { enabled: true },
   modules: [
-    'nuxt-content-assets',
     '@nuxt/content',
     '@nuxtjs/i18n',
     '@nuxt/image',
@@ -58,28 +57,72 @@ export default defineNuxtConfig({
     },
   },
   content: {
-    markdown: {
-      rehypePlugins: ['rehype-mathjax'],
-      remarkPlugins: ['remark-math'],
+    build: {
+      markdown: {
+        rehypePlugins: {
+          'rehype-mathjax': {},
+        },
+        remarkPlugins: {
+          'remark-math': {},
+        },
+        highlight: {
+          theme: 'github-light',
+          langs: [
+            'dockerfile',
+            'shell',
+            'js',
+            'ts',
+            'gdscript',
+            'yaml',
+            'json',
+            'cpp',
+            'csharp',
+            'java',
+            'ruby',
+            'rust',
+            'python',
+            'go',
+          ],
+        },
+      },
     },
-    highlight: {
-      theme: 'github-light',
-      langs: [
-        'dockerfile',
-        'shell',
-        'js',
-        'ts',
-        'gdscript',
-        'yaml',
-        'json',
-        'c++',
-        'csharp',
-        'java',
-        'ruby',
-        'rust',
-        'python',
-        'go',
-      ],
+  },
+  runtimeConfig: {
+    password: '',
+    neodbKey: '',
+    cmsUploadToken: '',
+    s3Bucket: '',
+    s3Region: 'us-east-1',
+    s3Endpoint: '',
+    s3AccessKeyId: '',
+    s3SecretAccessKey: '',
+    s3ForcePathStyle: false,
+    s3KeyPrefix: 'blog-media',
+    s3MultipartPartSizeMb: 10,
+    s3MaxUploadMb: 2048,
+    s3AllowedContentTypes: 'image/,video/',
+    public: {
+      mediaBaseUrl: '',
+      cmsBackendName: 'github',
+      cmsContentRepo: '',
+      cmsContentBranch: 'main',
+      cmsBaseUrl: '',
+      cmsAuthEndpoint: '',
+      cmsLocalBackend: false,
+      title: 'blog',
+      description: 'this is my blog',
+      host: 'http://localhost:3000',
+      giscus: {
+        repo: 'giscus/giscus',
+        repoId: 'MDEwOlJlcG9zaXRvcnkzNTE5NTgwNTM=',
+        categoryId: 'DIC_kwDOFjH-684Cf9nP',
+        mapping: 'specific',
+        theme: 'preferred_color_scheme',
+        strict: '1',
+        inputPosition: 'bottom',
+        emitMetadata: '0',
+        reactionsEnabled: '1',
+      } as GiscusProps,
     },
   },
   $development: {
@@ -106,7 +149,8 @@ export default defineNuxtConfig({
   },
   // make your own $production runtimeConfig
   i18n: {
-    vueI18n: './i18n.config.ts',
+    defaultLocale: 'en',
+    vueI18n: 'i18n.config.ts',
   },
   compatibilityDate: '2024-10-28',
 })

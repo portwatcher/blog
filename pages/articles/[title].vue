@@ -3,26 +3,24 @@
     v-if="article"
     class="post"
   >
-    <ContentRenderer :value="article">
-      <h1 class="title">{{ article.title }}</h1>
+    <h1 class="title">{{ article.title }}</h1>
 
-      <ContentRendererMarkdown
-        v-if="article.status === 'public' || article.authenticated"
-        class="markdown"
-        :value="article"
-      />
-      <div
-        v-else
-        class="password-form"
+    <ContentRenderer
+      v-if="article.status === 'public' || article.authenticated"
+      class="markdown"
+      :value="article"
+    />
+    <div
+      v-else
+      class="password-form"
+    >
+      <input
+        v-model="password"
+        type="text"
+        placeholder="input password"
       >
-        <input
-          v-model="password"
-          type="text"
-          placeholder="input password"
-        >
-        <button @click="unlock">unlock</button>
-      </div>
-    </ContentRenderer>
+      <button @click="unlock">unlock</button>
+    </div>
 
     <div class="date">
       @{{ article.date }}
@@ -34,14 +32,12 @@
 </template>
 
 <script setup lang="ts">
-import type { ParsedContent } from '@nuxt/content/types'
-
 const route = useRoute()
 const config = useRuntimeConfig()
 const password = ref<string | null>(null)
-const article = ref<ParsedContent | null>(null)
+const article = ref<Article | null>(null)
 
-const { data: articles } = await useFetch<ParsedContent[]>('/api/articles', {
+const { data: articles } = await useFetch<Article[]>('/api/articles', {
   query: {
     title: route.params.title,
   },
@@ -69,7 +65,7 @@ const unlock = async function () {
     },
   })
 
-  article.value = articles[0] as ParsedContent | null
+  article.value = articles[0] as Article | null
 }
 </script>
 

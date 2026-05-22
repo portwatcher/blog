@@ -1,4 +1,4 @@
-import { serverQueryContent } from '#content/server'
+import { queryCollection } from '@nuxt/content/server'
 import {
   getClientIP,
   isBlocked,
@@ -9,37 +9,80 @@ import {
 
 const limit = 10
 
+type ArticleDocument = Record<string, any>
+
+const getArticleCategory = (article: ArticleDocument) => {
+  if (article.category) return String(article.category)
+  const path = String(article.path || article._path || '')
+  return path.split('/').filter(Boolean)[0] || ''
+}
+
+const withCompatibilityFields = (article: ArticleDocument) => ({
+  ...article,
+  _path: article._path || article.path,
+  _dir: article._dir || getArticleCategory(article),
+})
+
+const parseOnlyFields = (only: unknown) => {
+  const fields = Array.isArray(only)
+    ? only.map(String)
+    : String(only).split(',')
+
+  const normalized = new Set<string>()
+
+  for (const rawField of fields) {
+    const field = rawField.trim()
+    if (!field) continue
+    if (field === '_path') {
+      normalized.add('path')
+      continue
+    }
+    if (field === '_dir') {
+      normalized.add('path')
+      normalized.add('category')
+      continue
+    }
+    normalized.add(field)
+  }
+
+  normalized.add('status')
+  normalized.add('path')
+
+  return Array.from(normalized)
+}
+
 export default defineEventHandler(async (event) => {
   const query = getQuery(event)
-  const queryBuilder = serverQueryContent(event).sort({ date: -1 })
+  const queryBuilder = queryCollection(event, 'articles').order('date', 'DESC')
   const config = useRuntimeConfig()
   const ip = getClientIP(event)
 
   if (query.title) {
-    queryBuilder.where({ title: String(query.title) })
+    queryBuilder.where('title', '=', String(query.title))
   }
   if (query.path) {
-    queryBuilder.where({ _path: String(query.path) })
+    queryBuilder.where('path', '=', String(query.path))
   }
   if (query.category) {
-    queryBuilder.where({ _dir: String(query.category) })
+    const category = String(query.category)
+    queryBuilder.andWhere((group) =>
+      group
+        .where('category', '=', category)
+        .orWhere((pathGroup) => pathGroup.where('path', 'LIKE', `/${category}/%`))
+    )
   }
   if (query.page) {
     queryBuilder.limit(limit).skip((Number(query.page) - 1) * limit)
   }
   if (query.status) {
-    queryBuilder.where({ status: String(query.status) })
+    queryBuilder.where('status', '=', String(query.status))
   }
   if (query.only) {
-    const fields = Array.isArray(query.only)
-      ? (query.only as string[])
-      : String(query.only).split(',')
-    if (!fields.includes('status')) fields.push('status')
-    // Avoid sending body in listings by default; consumers can explicitly request it
-    queryBuilder.only(fields)
+    // Avoid sending body in listings by default; consumers can explicitly request it.
+    queryBuilder.select(...(parseOnlyFields(query.only) as any[]))
   }
 
-  const docs = await queryBuilder.find()
+  const docs = ((await queryBuilder.all()) as ArticleDocument[]).map(withCompatibilityFields) as ArticleDocument[]
   if (query.title) {
     const doc = docs[0]
     if (!doc) {

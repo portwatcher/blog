@@ -9,12 +9,10 @@
 </template>
 
 <script setup lang="ts">
-import type { ParsedContent } from '@nuxt/content/types'
-
 const config = useRuntimeConfig()
 const { t } = useI18n()
 
-const { data } = await useFetch<ParsedContent[]>('/api/articles')
+const { data } = await useFetch<Article[]>('/api/articles')
 
 const yearGroupMap: YearGroupMap = new Map()
 

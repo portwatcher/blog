@@ -49,7 +49,34 @@ interface GroupedShelfData {
   }
 }
 
-type YearGroupMap = Map<number, ParsedContent[]>
+interface MediaAsset {
+  provider: 's3'
+  key: string
+  alt?: string
+  filename?: string
+  contentType?: string
+  size?: number
+  width?: number
+  height?: number
+}
+
+interface Article {
+  title: string
+  description?: string
+  category?: string
+  date: string
+  status?: 'public' | 'private'
+  path?: string
+  _path?: string
+  _dir?: string
+  body?: any
+  cover?: MediaAsset
+  video?: MediaAsset
+  authenticated?: boolean
+  [key: string]: any
+}
+
+type YearGroupMap = Map<number, Article[]>
 
 interface CategoryInfo {
   title: string

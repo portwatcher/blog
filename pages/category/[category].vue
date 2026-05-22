@@ -7,13 +7,11 @@
 </template>
 
 <script setup lang="ts">
-import type { ParsedContent } from '@nuxt/content/types'
-
 const route = useRoute()
 const page = Number(route.query.page) ?? 1
 const config = useRuntimeConfig()
 
-const { data: articles } = await useFetch<ParsedContent[]>('/api/articles', {
+const { data: articles } = await useFetch<Article[]>('/api/articles', {
   query: {
     category: route.params.category,
     page,

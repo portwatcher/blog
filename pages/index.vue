@@ -24,11 +24,9 @@
 </template>
 
 <script setup lang="ts">
-import type { ParsedContent } from '@nuxt/content/types'
-
 const config = useRuntimeConfig()
 
-const { data } = await useFetch<ParsedContent[]>('/api/articles', {
+const { data } = await useFetch<Article[]>('/api/articles', {
   query: {
     only: ['title', '_dir', 'description']
   },
@@ -36,13 +34,14 @@ const { data } = await useFetch<ParsedContent[]>('/api/articles', {
 
 const latestArticle = data.value?.[0]
 
-const categories = data.value?.reduce((acc: CategoryInfo[], article: ParsedContent) => {
-  const category = acc.find((c) => c.title === article._dir)
+const categories = data.value?.reduce((acc: CategoryInfo[], article: Article) => {
+  const categoryTitle = article._dir || 'uncategorized'
+  const category = acc.find((c) => c.title === categoryTitle)
   if (category) {
     category.count++
   } else {
     acc.push({
-      title: article._dir,
+      title: categoryTitle,
       count: 1
     })
   }

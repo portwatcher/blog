@@ -10,10 +10,8 @@
 
 
 <script setup lang="ts">
-import type { ParsedContent } from '@nuxt/content/types'
-
 defineProps<{
-  articles: ParsedContent[]
+  articles: Article[]
 }>()
 </script>
 
