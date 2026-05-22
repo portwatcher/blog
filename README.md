@@ -69,7 +69,7 @@ Make `status` private will hide your article
 
 Open `/admin` to use Decap CMS. Decap commits Markdown to `NUXT_PUBLIC_CMS_CONTENT_REPO`.
 
-Images and videos are not committed to git. The custom Decap widgets upload files through this Nuxt app into S3-compatible storage and write only object references into Markdown/frontmatter.
+Images and videos are served from S3-compatible storage. The custom Decap widgets upload files through this Nuxt app and write object references into Markdown/frontmatter; an optional Git LFS mirror can keep a backup copy in the content repo.
 
 Set media envs:
 
@@ -91,6 +91,28 @@ NUXT_S3_FORCE_PATH_STYLE=true
 ```
 
 Multipart uploads are always used. The browser uploads each part directly to S3 with presigned URLs; S3 credentials never leave the server.
+
+If you want the content repo to keep a backup copy of every uploaded image and video, enable the Git LFS mirror:
+
+```env
+NUXT_CMS_LFS_BACKUP_ENABLED=true
+NUXT_CMS_LFS_REPOSITORY=https://github.com/owner/private-blog-content.git
+NUXT_CMS_LFS_BRANCH=main
+NUXT_CMS_LFS_MEDIA_DIR=media
+NUXT_CMS_LFS_AUTH_USERNAME=x-access-token
+NUXT_CMS_LFS_AUTH_TOKEN=github_pat_or_deploy_token_with_write_access
+```
+
+The deployment runtime must have `git` and `git-lfs` installed. After S3 multipart completion, the server clones the content repo, ensures `media/**` is tracked by Git LFS, downloads the S3 object, commits it under `NUXT_CMS_LFS_MEDIA_DIR`, and pushes it back. S3 remains the serving source; the Git LFS copy is the recovery archive.
+
+When the mirror succeeds, Decap stores the backup path with the media reference:
+
+```yaml
+cover:
+  provider: s3
+  key: blog-media/2026/05/22/example.webp
+  lfsPath: media/2026/05/22/example.webp
+```
 
 Configure bucket CORS for the admin origin:
 

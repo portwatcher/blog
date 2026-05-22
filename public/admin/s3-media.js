@@ -95,6 +95,15 @@
     return response.json();
   }
 
+  function backupFields(backup) {
+    if (!backup || backup.status === 'disabled') return {};
+    return {
+      lfsPath: backup.lfsPath || '',
+      backupStatus: backup.status || '',
+      backupError: backup.error || '',
+    };
+  }
+
   function readImageDimensions(file) {
     return new Promise(function (resolve) {
       if (!file.type || file.type.indexOf('image/') !== 0) return resolve({});
@@ -179,6 +188,7 @@
       return cmsJson('/api/cms/media/multipart/complete', {
         key: upload.key,
         uploadId: upload.uploadId,
+        filename: file.name,
         parts: parts,
       });
     } catch (error) {
@@ -221,8 +231,14 @@
             filename: file.name,
             contentType: file.type || '',
             size: file.size,
-          }));
-          this.setState({ progress: 100, uploading: false });
+          }, backupFields(result.backup)));
+          this.setState({
+            progress: 100,
+            uploading: false,
+            error: result.backup && result.backup.status === 'failed'
+              ? 'Uploaded to S3, but Git LFS backup failed: ' + (result.backup.error || 'unknown error')
+              : '',
+          });
         } catch (error) {
           this.setState({
             error: error && error.message ? error.message : String(error),
@@ -240,6 +256,34 @@
 
       handleClear: function () {
         this.props.onChange(null);
+      },
+
+      handleRetryBackup: async function () {
+        var asset = valueToJS(this.props.value);
+        if (!asset.key) return;
+
+        this.setState({ error: '', progress: 0, uploading: true });
+
+        try {
+          var backup = await cmsJson('/api/cms/media/backup', {
+            key: asset.key,
+            filename: asset.filename || '',
+          });
+
+          this.props.onChange(Object.assign({}, asset, backupFields(backup)));
+          this.setState({
+            progress: backup.status === 'failed' ? 0 : 100,
+            uploading: false,
+            error: backup.status === 'failed'
+              ? 'Git LFS backup failed: ' + (backup.error || 'unknown error')
+              : '',
+          });
+        } catch (error) {
+          this.setState({
+            error: error && error.message ? error.message : String(error),
+            uploading: false,
+          });
+        }
       },
 
       isValid: function () {
@@ -286,6 +330,9 @@
         var asset = valueToJS(this.props.value);
         var accept = fieldGet(this.props.field, 'accept', kind === 'image' ? 'image/*' : 'video/*');
         var label = asset.key ? asset.key : 'No S3 object selected';
+        var backupLabel = asset.lfsPath
+          ? (asset.backupStatus === 'failed' ? 'Git LFS backup failed: ' : 'Git LFS backup: ') + asset.lfsPath
+          : '';
 
         return h('div', { className: this.props.classNameWrapper },
           h('input', {
@@ -296,6 +343,16 @@
             onChange: this.handleUpload,
           }),
           h('div', { style: { marginTop: '8px', fontSize: '12px', color: '#555', wordBreak: 'break-all' } }, label),
+          backupLabel
+            ? h('div', {
+                style: {
+                  marginTop: '4px',
+                  fontSize: '12px',
+                  color: asset.backupStatus === 'failed' ? '#b00020' : '#555',
+                  wordBreak: 'break-all',
+                },
+              }, backupLabel)
+            : null,
           this.state.uploading
             ? h('progress', { value: this.state.progress, max: 100, style: { width: '100%', marginTop: '8px' } })
             : null,
@@ -311,6 +368,14 @@
           this.renderPreview(asset),
           asset.key
             ? h('button', { type: 'button', onClick: this.handleClear, style: { marginTop: '8px' } }, 'Clear')
+            : null,
+          asset.key && asset.backupStatus === 'failed'
+            ? h('button', {
+                type: 'button',
+                disabled: this.state.uploading,
+                onClick: this.handleRetryBackup,
+                style: { marginTop: '8px', marginLeft: '8px' },
+              }, 'Retry Git LFS backup')
             : null,
           this.state.error
             ? h('div', { style: { marginTop: '8px', color: '#b00020' } }, this.state.error)

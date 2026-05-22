@@ -58,6 +58,9 @@ interface MediaAsset {
   size?: number
   width?: number
   height?: number
+  lfsPath?: string
+  backupStatus?: 'disabled' | 'backed_up' | 'unchanged' | 'failed'
+  backupError?: string
 }
 
 interface Article {

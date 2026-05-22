@@ -9,6 +9,9 @@ const mediaAssetSchema = z.object({
   size: z.number().optional(),
   width: z.number().optional(),
   height: z.number().optional(),
+  lfsPath: z.string().optional(),
+  backupStatus: z.enum(['disabled', 'backed_up', 'unchanged', 'failed']).optional(),
+  backupError: z.string().optional(),
 })
 
 const cmsContentRepo = process.env.NUXT_PUBLIC_CMS_CONTENT_REPO
