@@ -3,22 +3,28 @@
     v-if="article"
     class="post"
   >
-    <h1 class="title">{{ article.title }}</h1>
+    <header class="article-header">
+      <h1 class="title">{{ article.title }}</h1>
 
-    <nav
-      v-if="translationLinks.length > 1"
-      class="translation-links"
-      aria-label="Article translations"
-    >
-      <NuxtLink
-        v-for="link in translationLinks"
-        :key="link.lang || 'original'"
-        :to="link.to"
-        :class="{ active: link.active }"
+      <nav
+        v-if="languageTabs.length > 1"
+        class="language-tabs"
+        aria-label="Article language"
+        role="tablist"
       >
-        {{ link.label }}
-      </NuxtLink>
-    </nav>
+        <NuxtLink
+          v-for="tab in languageTabs"
+          :key="tab.lang"
+          class="language-tab"
+          :to="tab.to"
+          :class="{ active: tab.active }"
+          :aria-selected="tab.active"
+          role="tab"
+        >
+          {{ tab.label }}
+        </NuxtLink>
+      </nav>
+    </header>
 
     <ContentRenderer
       v-if="article.status === 'public' || article.authenticated"
@@ -48,6 +54,7 @@
 
 <script setup lang="ts">
 const route = useRoute()
+const router = useRouter()
 const config = useRuntimeConfig()
 const password = ref<string | null>(null)
 const article = ref<Article | null>(null)
@@ -67,12 +74,89 @@ const configuredTranslationLanguages = computed(() =>
 const currentLang = computed(() => String(route.query.lang || ''))
 const originalLang = computed(() => String(config.public.originalLanguage || 'zh'))
 const availableTranslations = computed(() => article.value?.availableTranslations ?? [])
+const autoLanguageSelectionAttempted = ref(Boolean(currentLang.value))
 
 const getArticleQuery = () => ({
   title: route.params.title,
   lang: currentLang.value || undefined,
   password: password.value || undefined,
 })
+
+const normalizeLanguage = (lang: string) => String(lang || '').trim().toLowerCase()
+const languageBase = (lang: string) => normalizeLanguage(lang).split('-')[0]
+const languagesAlign = (left: string, right: string) => {
+  const normalizedLeft = normalizeLanguage(left)
+  const normalizedRight = normalizeLanguage(right)
+
+  return normalizedLeft === normalizedRight || languageBase(normalizedLeft) === languageBase(normalizedRight)
+}
+
+const availableLanguageCodes = computed(() => {
+  const translations = configuredTranslationLanguages.value.filter((lang) =>
+    lang !== originalLang.value && availableTranslations.value.includes(lang),
+  )
+
+  return [originalLang.value, ...translations]
+})
+
+const activeLang = computed(() => {
+  const routeLang = currentLang.value
+  if (routeLang && availableLanguageCodes.value.some((lang) => languagesAlign(lang, routeLang))) {
+    return availableLanguageCodes.value.find((lang) => languagesAlign(lang, routeLang)) || originalLang.value
+  }
+
+  const articleLang = article.value?.lang
+  if (articleLang && availableLanguageCodes.value.some((lang) => languagesAlign(lang, articleLang))) {
+    return availableLanguageCodes.value.find((lang) => languagesAlign(lang, articleLang)) || originalLang.value
+  }
+
+  return originalLang.value
+})
+
+const languageRoute = (lang: string) => {
+  const query = { ...route.query }
+
+  if (languagesAlign(lang, originalLang.value)) {
+    delete query.lang
+  } else {
+    query.lang = lang
+  }
+
+  return {
+    path: route.path,
+    query,
+  }
+}
+
+const getBrowserPreferredLanguage = () => {
+  if (!import.meta.client) return ''
+
+  const browserLanguages = navigator.languages?.length
+    ? navigator.languages
+    : [navigator.language].filter(Boolean)
+
+  for (const browserLanguage of browserLanguages) {
+    const match = availableLanguageCodes.value.find((lang) => languagesAlign(lang, browserLanguage))
+    if (match) return match
+  }
+
+  return ''
+}
+
+const applyBrowserLanguagePreference = async () => {
+  if (autoLanguageSelectionAttempted.value || currentLang.value || languageTabs.value.length <= 1) {
+    return
+  }
+
+  autoLanguageSelectionAttempted.value = true
+  const preferredLang = getBrowserPreferredLanguage()
+
+  if (!preferredLang || languagesAlign(preferredLang, originalLang.value)) {
+    return
+  }
+
+  await router.replace(languageRoute(preferredLang))
+}
 
 const loadArticle = async () => {
   const articles = await $fetch<Article[]>('/api/articles', {
@@ -85,37 +169,32 @@ const loadArticle = async () => {
 
 await loadArticle()
 
-const translationLinks = computed(() => {
-  const langs = configuredTranslationLanguages.value.filter((lang) =>
-    availableTranslations.value.includes(lang),
-  )
+const languageTabs = computed(() =>
+  availableLanguageCodes.value.map((lang) => ({
+    lang,
+    label: languageLabels[lang] || lang.toUpperCase(),
+    active: languagesAlign(activeLang.value, lang),
+    to: languageRoute(lang),
+  })),
+)
 
-  return [
-    {
-      lang: '',
-      label: languageLabels[originalLang.value] || originalLang.value.toUpperCase(),
-      active: !currentLang.value,
-      to: {
-        path: route.path,
-      },
-    },
-    ...langs.map((lang) => ({
-      lang,
-      label: languageLabels[lang] || lang.toUpperCase(),
-      active: currentLang.value === lang,
-      to: {
-        path: route.path,
-        query: {
-          lang,
-        },
-      },
-    })),
-  ]
+onMounted(() => {
+  void applyBrowserLanguagePreference()
 })
 
-watch(() => route.query.lang, () => {
-  void loadArticle()
-})
+watch(
+  () => [String(route.params.title || ''), String(route.query.lang || '')],
+  ([title], [previousTitle]) => {
+    if (title !== previousTitle) {
+      autoLanguageSelectionAttempted.value = Boolean(currentLang.value)
+    }
+
+    void (async () => {
+      await loadArticle()
+      await applyBrowserLanguagePreference()
+    })()
+  },
+)
 
 useSeoMeta({
   title: () => article.value?.title,
@@ -132,23 +211,41 @@ const unlock = async function () {
 </script>
 
 <style scoped>
-.translation-links {
-  display: flex;
-  justify-content: center;
-  gap: 0.75rem;
-  margin: -2.5rem 0 2.5rem;
-  font-size: 0.9rem;
+.article-header {
+  text-align: center;
+  border-bottom: 1px solid #eee;
+  margin: 1em 0 2.75em;
+  padding-top: 0.5em;
 }
 
-.translation-links a {
+.language-tabs {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0 0 -1px;
+  padding: 0 0.25rem;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.language-tab {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0 0.95rem;
+  border-bottom: 2px solid transparent;
   color: #777;
   text-decoration: none;
 }
 
-.translation-links a:hover,
-.translation-links a.active {
+.language-tab:hover,
+.language-tab.active {
   color: #111;
-  text-decoration: underline;
+}
+
+.language-tab.active {
+  border-bottom-color: #111;
 }
 
 .date {
@@ -180,9 +277,8 @@ const unlock = async function () {
 .post .title {
   color: #000;
   font-size: 2.3em;
-  padding: 0.5em 0 1.5em 0;
-  margin: 1em 0 2em 0;
-  border-bottom: 1px solid #eee;
+  padding: 0.5em 0 1.15em 0;
+  margin: 0;
   text-align: center;
   line-height: 1.2;
 }
