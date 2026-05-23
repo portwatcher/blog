@@ -110,6 +110,8 @@ export default defineNuxtConfig({
     cmsLfsAuthorName: 'Blog CMS',
     cmsLfsAuthorEmail: 'blog-cms@example.invalid',
     cmsLfsCommitMessagePrefix: 'Backup media',
+    cmsAdminToken: '',
+    cmsGithubAuthToken: '',
     public: {
       mediaBaseUrl: '',
       cmsBackendName: 'github',
@@ -117,6 +119,7 @@ export default defineNuxtConfig({
       cmsContentBranch: 'main',
       cmsBaseUrl: '',
       cmsAuthEndpoint: '',
+      cmsApiRoot: '',
       cmsLocalBackend: false,
       title: 'blog',
       description: 'this is my blog',

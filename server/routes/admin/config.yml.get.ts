@@ -4,15 +4,39 @@ const yamlBoolean = (value: unknown) => value === true || value === 'true' || va
 
 const categories = ['Art', 'Books', 'Design', 'Life', 'Startup', 'Technology', 'Thoughts']
 
+const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '')
+
+const getRequestOrigin = (event: any) => {
+  const host = getHeader(event, 'x-forwarded-host') || getHeader(event, 'host') || 'localhost:3000'
+  const isLocalHost = host.includes('localhost') || host.startsWith('127.') || host.startsWith('[::1]')
+  const protocol = isLocalHost
+    ? 'http'
+    : getHeader(event, 'x-forwarded-proto') || 'https'
+
+  return `${protocol}://${host}`
+}
+
+const getCmsOrigin = (event: any, publicHost: unknown) => {
+  const configured = typeof publicHost === 'string' ? publicHost : ''
+
+  if (configured && !configured.includes('localhost')) {
+    return trimTrailingSlash(configured)
+  }
+
+  return trimTrailingSlash(getRequestOrigin(event))
+}
+
 export default defineEventHandler((event) => {
   const config = useRuntimeConfig(event)
   const publicConfig = config.public
+  const backendName = String(publicConfig.cmsBackendName || 'github')
+  const cmsOrigin = getCmsOrigin(event, publicConfig.host)
   const lines: string[] = []
 
   event.node.res.setHeader('content-type', 'text/yaml; charset=utf-8')
 
   lines.push('backend:')
-  lines.push(`  name: ${yamlString(publicConfig.cmsBackendName || 'github')}`)
+  lines.push(`  name: ${yamlString(backendName)}`)
 
   if (publicConfig.cmsContentRepo) {
     lines.push(`  repo: ${yamlString(publicConfig.cmsContentRepo)}`)
@@ -20,10 +44,14 @@ export default defineEventHandler((event) => {
   if (publicConfig.cmsContentBranch) {
     lines.push(`  branch: ${yamlString(publicConfig.cmsContentBranch)}`)
   }
-  if (publicConfig.cmsBaseUrl) {
+  if (backendName === 'github') {
+    lines.push(`  base_url: ${yamlString(publicConfig.cmsBaseUrl || cmsOrigin)}`)
+    lines.push(`  auth_endpoint: ${yamlString(publicConfig.cmsAuthEndpoint || 'admin/auth')}`)
+    lines.push(`  api_root: ${yamlString(publicConfig.cmsApiRoot || `${cmsOrigin}/admin/github-api`)}`)
+  } else if (publicConfig.cmsBaseUrl) {
     lines.push(`  base_url: ${yamlString(publicConfig.cmsBaseUrl)}`)
   }
-  if (publicConfig.cmsAuthEndpoint) {
+  if (backendName !== 'github' && publicConfig.cmsAuthEndpoint) {
     lines.push(`  auth_endpoint: ${yamlString(publicConfig.cmsAuthEndpoint)}`)
   }
 
