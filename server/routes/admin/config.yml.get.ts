@@ -2,8 +2,6 @@ const yamlString = (value: unknown) => JSON.stringify(String(value ?? ''))
 
 const yamlBoolean = (value: unknown) => value === true || value === 'true' || value === '1'
 
-const categories = ['Art', 'Books', 'Design', 'Life', 'Startup', 'Technology', 'Thoughts']
-
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '')
 
 const getRequestOrigin = (event: any) => {
@@ -62,6 +60,18 @@ export default defineEventHandler((event) => {
   lines.push('media_folder: "_decap-unused-media"')
   lines.push('public_folder: "/_decap-unused-media"')
   lines.push('collections:')
+  lines.push('  - name: "categories"')
+  lines.push('    label: "Categories"')
+  lines.push('    label_singular: "Category"')
+  lines.push('    folder: "categories"')
+  lines.push('    create: true')
+  lines.push('    identifier_field: "slug"')
+  lines.push('    slug: "{{slug}}"')
+  lines.push('    summary: "{{title}} ({{slug}})"')
+  lines.push('    fields:')
+  lines.push('      - { label: "Title", name: "title", widget: "string" }')
+  lines.push('      - { label: "Slug", name: "slug", widget: "string", hint: "Folder and URL segment used by posts, e.g. Technology or personal-notes.", pattern: ["^[^/]+$", "Category slug cannot contain slashes."] }')
+  lines.push('      - { label: "Description", name: "description", widget: "text", required: false }')
   lines.push('  - name: "posts"')
   lines.push('    label: "Posts"')
   lines.push('    folder: "posts"')
@@ -72,7 +82,7 @@ export default defineEventHandler((event) => {
   lines.push('    fields:')
   lines.push('      - { label: "Title", name: "title", widget: "string" }')
   lines.push('      - { label: "Description", name: "description", widget: "text", required: false }')
-  lines.push(`      - { label: "Category", name: "category", widget: "select", options: [${categories.map(yamlString).join(', ')}], default: "Thoughts" }`)
+  lines.push('      - { label: "Category", name: "category", widget: "relation", collection: "categories", search_fields: ["title", "slug"], display_fields: ["title", "slug"], value_field: "slug", default: "Thoughts", options_length: 100 }')
   lines.push('      - { label: "Date", name: "date", widget: "datetime", format: "YYYY-MM-DD HH:mm", date_format: "YYYY-MM-DD", time_format: "HH:mm" }')
   lines.push('      - { label: "Status", name: "status", widget: "select", options: ["public", "private"], default: "public" }')
   lines.push('      - { label: "Legacy path", name: "legacyPath", widget: "hidden", required: false }')
