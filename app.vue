@@ -5,15 +5,19 @@
 </template>
 
 <script setup lang="ts">
-const { setLocale } = useI18n()
+const supportedLocales = ['en', 'zh', 'ja']
+const { locale: currentLocale, setLocale } = useI18n()
 
-const locale = import.meta.client
+const detectedLocale = import.meta.client
   ? navigator.language.slice(0, 2).toLowerCase()
   : useRequestHeaders(['accept-language'])
     ?.['accept-language']?.slice(0, 2)
     .toLowerCase() || 'en'
+const locale = supportedLocales.includes(detectedLocale) ? detectedLocale : 'en'
 
-setLocale(locale)
+if (currentLocale.value !== locale) {
+  await setLocale(locale)
+}
 </script>
 
 <style>

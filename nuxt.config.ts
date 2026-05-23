@@ -158,7 +158,10 @@ export default defineNuxtConfig({
   },
   // make your own $production runtimeConfig
   i18n: {
+    locales: ['en', 'zh', 'ja'],
     defaultLocale: 'en',
+    strategy: 'no_prefix',
+    detectBrowserLanguage: false,
     vueI18n: 'i18n.config.ts',
   },
   compatibilityDate: '2024-10-28',
