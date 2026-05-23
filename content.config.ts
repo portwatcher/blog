@@ -27,7 +27,7 @@ const contentUsername = process.env.BLOG_CONTENT_AUTH_USERNAME || 'x-access-toke
 
 const articleSource = contentRepository
   ? {
-      include: process.env.BLOG_CONTENT_INCLUDE || '**/*.md',
+      include: process.env.BLOG_CONTENT_INCLUDE || 'posts/**/*.md',
       prefix: '/',
       repository: {
         url: contentRepository,
@@ -56,6 +56,7 @@ export default defineContentConfig({
         category: z.string().optional(),
         date: z.string(),
         status: z.enum(['public', 'private']).default('public'),
+        legacyPath: z.string().optional(),
         cover: mediaAssetSchema.optional(),
         video: mediaAssetSchema.optional(),
       }),
@@ -65,6 +66,7 @@ export default defineContentConfig({
         { columns: ['status'] },
         { columns: ['category'] },
         { columns: ['path'] },
+        { columns: ['legacyPath'] },
       ],
     }),
   },

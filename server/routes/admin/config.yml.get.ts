@@ -2,6 +2,8 @@ const yamlString = (value: unknown) => JSON.stringify(String(value ?? ''))
 
 const yamlBoolean = (value: unknown) => value === true || value === 'true' || value === '1'
 
+const categories = ['Art', 'Books', 'Design', 'Life', 'Startup', 'Technology', 'Thoughts']
+
 export default defineEventHandler((event) => {
   const config = useRuntimeConfig(event)
   const publicConfig = config.public
@@ -35,15 +37,26 @@ export default defineEventHandler((event) => {
   lines.push('  - name: "posts"')
   lines.push('    label: "Posts"')
   lines.push('    folder: "posts"')
+  lines.push('    path: "{{category}}/{{year}}-{{month}}-{{day}}-{{slug}}"')
   lines.push('    create: true')
   lines.push('    slug: "{{year}}-{{month}}-{{day}}-{{slug}}"')
   lines.push('    summary: "{{title}} - {{date}}"')
+  lines.push('    nested:')
+  lines.push('      depth: 2')
+  lines.push('      summary: "{{title}}"')
+  lines.push('      subfolders: false')
+  lines.push('    meta:')
+  lines.push('      path:')
+  lines.push('        widget: "string"')
+  lines.push('        label: "Path"')
+  lines.push('        required: false')
   lines.push('    fields:')
   lines.push('      - { label: "Title", name: "title", widget: "string" }')
   lines.push('      - { label: "Description", name: "description", widget: "text", required: false }')
-  lines.push('      - { label: "Category", name: "category", widget: "string", required: false }')
+  lines.push(`      - { label: "Category", name: "category", widget: "select", options: [${categories.map(yamlString).join(', ')}], default: "Thoughts" }`)
   lines.push('      - { label: "Date", name: "date", widget: "datetime", format: "YYYY-MM-DD HH:mm", date_format: "YYYY-MM-DD", time_format: "HH:mm" }')
   lines.push('      - { label: "Status", name: "status", widget: "select", options: ["public", "private"], default: "public" }')
+  lines.push('      - { label: "Legacy path", name: "legacyPath", widget: "hidden", required: false }')
   lines.push('      - { label: "Cover image", name: "cover", widget: "s3-image", required: false }')
   lines.push('      - { label: "Featured video", name: "video", widget: "s3-video", required: false }')
   lines.push('      - { label: "Body", name: "body", widget: "markdown" }')

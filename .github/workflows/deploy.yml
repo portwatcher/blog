@@ -1,0 +1,72 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - develop
+  repository_dispatch:
+    types:
+      - blog-content-updated
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: blog-deploy
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/portwatcher/blog
+  IMAGE_TAG: develop
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE }}:${{ github.sha }}
+          build-args: |
+            NUXT_PUBLIC_CMS_CONTENT_REPO=portwatcher/blog-content
+            NUXT_PUBLIC_CMS_CONTENT_BRANCH=main
+            NUXT_PUBLIC_MEDIA_BASE_URL=https://jury-files.sgp1.digitaloceanspaces.com
+          secrets: |
+            blog_content_auth_token=${{ secrets.BLOG_CONTENT_AUTH_TOKEN }}
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          mkdir -p ~/.kube
+          printf '%s' "$KUBE_CONFIG" > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Restart production deployment
+        run: |
+          kubectl -n perohub set image deployment/blog blog=${IMAGE}:${IMAGE_TAG}
+          kubectl -n perohub rollout restart deployment/blog
+          kubectl -n perohub rollout status deployment/blog --timeout=300s

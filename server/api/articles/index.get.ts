@@ -47,6 +47,7 @@ const parseOnlyFields = (only: unknown) => {
 
   normalized.add('status')
   normalized.add('path')
+  normalized.add('legacyPath')
 
   return Array.from(normalized)
 }
@@ -56,14 +57,12 @@ export default defineEventHandler(async (event) => {
   const queryBuilder = queryCollection(event, 'articles').order('date', 'DESC')
   const config = useRuntimeConfig()
   const ip = getClientIP(event)
+  const requestedPath = query.path ? String(query.path) : ''
 
   if (query.title) {
     queryBuilder.where('title', '=', String(query.title))
   }
-  if (query.path) {
-    queryBuilder.where('path', '=', String(query.path))
-  }
-  if (query.category) {
+  if (query.category && !requestedPath) {
     const category = String(query.category)
     queryBuilder.andWhere((group) =>
       group
@@ -82,7 +81,17 @@ export default defineEventHandler(async (event) => {
     queryBuilder.select(...(parseOnlyFields(query.only) as any[]))
   }
 
-  const docs = ((await queryBuilder.all()) as ArticleDocument[]).map(withCompatibilityFields) as ArticleDocument[]
+  let docs = ((await queryBuilder.all()) as ArticleDocument[]).map(withCompatibilityFields) as ArticleDocument[]
+  if (requestedPath) {
+    const normalizedPath = requestedPath.toLowerCase()
+    docs = docs.filter((doc) =>
+      [doc.path, doc._path, doc.legacyPath].some((value) => {
+        const candidate = String(value || '')
+        return candidate === requestedPath || candidate.toLowerCase() === normalizedPath
+      })
+    )
+  }
+
   if (query.title) {
     const doc = docs[0]
     if (!doc) {

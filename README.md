@@ -132,8 +132,8 @@ In Markdown body content, use the Decap editor components or write MDC manually:
 ::
 ```
 
-Content repo pushes should trigger this app repo's deploy through your host's deploy hook or GitHub Actions workflow. The content repo itself does not need CI.
+Content repo pushes should trigger this app repo's deploy. This repository includes a `Deploy` GitHub Actions workflow that accepts a `repository_dispatch` event named `blog-content-updated`, rebuilds the image with the private content repo, pushes `ghcr.io/portwatcher/blog:develop`, and restarts the production Kubernetes deployment.
 
 ### Deploy
 
-vercel, netlify, self made image with `Dockerfile`, you name it.
+The Docker build reads private content with a BuildKit secret named `blog_content_auth_token`; do not pass the content token as a normal Docker build arg.
