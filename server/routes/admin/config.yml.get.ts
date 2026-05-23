@@ -49,6 +49,7 @@ export default defineEventHandler((event) => {
   lines.push('      path:')
   lines.push('        widget: "string"')
   lines.push('        label: "Path"')
+  lines.push('        index_file: "_index"')
   lines.push('        required: false')
   lines.push('    fields:')
   lines.push('      - { label: "Title", name: "title", widget: "string" }')
