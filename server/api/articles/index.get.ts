@@ -17,11 +17,80 @@ const getArticleCategory = (article: ArticleDocument) => {
   return path.split('/').filter(Boolean)[0] || ''
 }
 
+const parseCsv = (value: unknown) =>
+  String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+const getRequestedTranslationLang = (queryLang: unknown, config: ReturnType<typeof useRuntimeConfig>) => {
+  const lang = String(queryLang || '').trim()
+  if (!lang) return ''
+
+  const originalLang = String(config.public.originalLanguage || 'zh')
+  if (lang === originalLang || lang === 'original') return ''
+
+  const configured = new Set(parseCsv(config.public.translationLanguages || 'en,ja'))
+  return configured.has(lang) ? lang : ''
+}
+
 const withCompatibilityFields = (article: ArticleDocument) => ({
   ...article,
   _path: article._path || article.path,
   _dir: article._dir || getArticleCategory(article),
 })
+
+const getArticleTranslations = async (event: any, article: ArticleDocument) => {
+  const originalTitle = String(article.title || '')
+  if (!originalTitle) return []
+
+  const translations = await queryCollection(event, 'translations')
+    .where('originalTitle', '=', originalTitle)
+    .all() as ArticleDocument[]
+
+  return translations.map(withCompatibilityFields)
+}
+
+const getArticleWithTranslation = async (
+  event: any,
+  article: ArticleDocument,
+  lang: string,
+  translations: ArticleDocument[],
+) => {
+  const availableTranslations = Array.from(
+    new Set(translations.map((translation) => String(translation.lang || '')).filter(Boolean)),
+  ).sort()
+
+  if (!lang) {
+    return {
+      ...article,
+      requestedLang: '',
+      availableTranslations,
+    }
+  }
+
+  const translation = translations.find((candidate) => String(candidate.lang || '') === lang)
+  if (!translation) {
+    return {
+      ...article,
+      requestedLang: lang,
+      availableTranslations,
+    }
+  }
+
+  return {
+    ...translation,
+    _path: article._path || article.path,
+    _dir: article._dir || getArticleCategory(article),
+    category: article.category || translation.category,
+    date: article.date || translation.date,
+    status: article.status || translation.status,
+    legacyPath: article.legacyPath,
+    authenticated: article.authenticated,
+    requestedLang: lang,
+    availableTranslations,
+  }
+}
 
 const parseOnlyFields = (only: unknown) => {
   const fields = Array.isArray(only)
@@ -58,6 +127,7 @@ export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
   const ip = getClientIP(event)
   const requestedPath = query.path ? String(query.path) : ''
+  const requestedLang = getRequestedTranslationLang(query.lang, config)
 
   if (query.title) {
     queryBuilder.where('title', '=', String(query.title))
@@ -97,10 +167,11 @@ export default defineEventHandler(async (event) => {
     if (!doc) {
       return []
     }
+    const translations = await getArticleTranslations(event, doc)
 
     if (doc.status === 'public') {
       // Return as-is for public articles
-      return [doc]
+      return [await getArticleWithTranslation(event, doc, requestedLang, translations)]
     } else if (doc.status === 'private') {
       // Rate limit unlock attempts and block abusive IPs
       const blockState = isBlocked(ip)
@@ -188,11 +259,12 @@ export default defineEventHandler(async (event) => {
       } else {
         // Successful unlock resets failure counters
         noteSuccessfulUnlock(ip)
+        const unlockedDoc = {
+          ...doc,
+          authenticated: true,
+        }
         return [
-          {
-            ...doc,
-            authenticated: true,
-          },
+          await getArticleWithTranslation(event, unlockedDoc, requestedLang, translations),
         ]
       }
     }

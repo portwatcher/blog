@@ -25,25 +25,33 @@ const contentBranch = process.env.BLOG_CONTENT_BRANCH || process.env.NUXT_PUBLIC
 const contentToken = process.env.BLOG_CONTENT_AUTH_TOKEN
 const contentUsername = process.env.BLOG_CONTENT_AUTH_USERNAME || 'x-access-token'
 
-const articleSource = contentRepository
+const remoteRepository = contentRepository
   ? {
-      include: process.env.BLOG_CONTENT_INCLUDE || 'posts/**/*.md',
-      prefix: '/',
-      repository: {
-        url: contentRepository,
-        branch: contentBranch,
-        auth: contentToken
-          ? {
-              username: contentUsername,
-              token: contentToken,
-            }
-          : undefined,
-      },
+      url: contentRepository,
+      branch: contentBranch,
+      auth: contentToken
+        ? {
+            username: contentUsername,
+            token: contentToken,
+          }
+        : undefined,
     }
-  : {
-      include: '**/*.md',
-      prefix: '/',
-    }
+  : undefined
+
+const makeSource = (include: string, localInclude = include) =>
+  remoteRepository
+    ? {
+        include,
+        prefix: '/',
+        repository: remoteRepository,
+      }
+    : {
+        include: localInclude,
+        prefix: '/',
+      }
+
+const articleSource = makeSource(process.env.BLOG_CONTENT_INCLUDE || 'posts/**/*.md', '**/*.md')
+const translationSource = makeSource(process.env.BLOG_TRANSLATION_INCLUDE || 'translations/**/*.md')
 
 export default defineContentConfig({
   collections: {
@@ -67,6 +75,31 @@ export default defineContentConfig({
         { columns: ['category'] },
         { columns: ['path'] },
         { columns: ['legacyPath'] },
+      ],
+    }),
+    translations: defineCollection({
+      type: 'page',
+      source: translationSource,
+      schema: z.object({
+        title: z.string(),
+        description: z.string().default(''),
+        category: z.string().optional(),
+        date: z.string(),
+        status: z.enum(['public', 'private']).default('public'),
+        lang: z.string(),
+        sourcePath: z.string(),
+        sourceHash: z.string(),
+        originalTitle: z.string(),
+        legacyPath: z.string().optional(),
+        cover: mediaAssetSchema.optional(),
+        video: mediaAssetSchema.optional(),
+      }),
+      indexes: [
+        { columns: ['lang'] },
+        { columns: ['originalTitle'] },
+        { columns: ['sourcePath'] },
+        { columns: ['sourceHash'] },
+        { columns: ['status'] },
       ],
     }),
   },

@@ -5,6 +5,21 @@
   >
     <h1 class="title">{{ article.title }}</h1>
 
+    <nav
+      v-if="translationLinks.length > 1"
+      class="translation-links"
+      aria-label="Article translations"
+    >
+      <NuxtLink
+        v-for="link in translationLinks"
+        :key="link.lang || 'original'"
+        :to="link.to"
+        :class="{ active: link.active }"
+      >
+        {{ link.label }}
+      </NuxtLink>
+    </nav>
+
     <ContentRenderer
       v-if="article.status === 'public' || article.authenticated"
       class="markdown"
@@ -36,40 +51,106 @@ const route = useRoute()
 const config = useRuntimeConfig()
 const password = ref<string | null>(null)
 const article = ref<Article | null>(null)
-
-const { data: articles } = await useFetch<Article[]>('/api/articles', {
-  query: {
-    title: route.params.title,
-  },
-})
-
-article.value = articles.value?.[0] ?? null
-
-if (article.value) {
-  useSeoMeta({
-    title: article.value.title,
-    description: article.value.description,
-    ogDescription: article.value.description,
-    ogUrl: `${config.public.host}/articles/${article.value.title}`,
-    ogTitle: article.value.title,
-    twitterCard: 'summary',
-  })
+const languageLabels: Record<string, string> = {
+  zh: '中文',
+  en: 'English',
+  ja: '日本語',
 }
 
-const unlock = async function () {
-  const articles = await $fetch('/api/articles', {
+const configuredTranslationLanguages = computed(() =>
+  String(config.public.translationLanguages || 'en,ja')
+    .split(',')
+    .map((lang) => lang.trim())
+    .filter(Boolean),
+)
+
+const currentLang = computed(() => String(route.query.lang || ''))
+const originalLang = computed(() => String(config.public.originalLanguage || 'zh'))
+const availableTranslations = computed(() => article.value?.availableTranslations ?? [])
+
+const getArticleQuery = () => ({
+  title: route.params.title,
+  lang: currentLang.value || undefined,
+  password: password.value || undefined,
+})
+
+const loadArticle = async () => {
+  const articles = await $fetch<Article[]>('/api/articles', {
     method: 'GET',
-    query: {
-      title: route.params.title,
-      password: password.value,
-    },
+    query: getArticleQuery(),
   })
 
   article.value = articles[0] as Article | null
 }
+
+await loadArticle()
+
+const translationLinks = computed(() => {
+  const langs = configuredTranslationLanguages.value.filter((lang) =>
+    availableTranslations.value.includes(lang),
+  )
+
+  return [
+    {
+      lang: '',
+      label: languageLabels[originalLang.value] || originalLang.value.toUpperCase(),
+      active: !currentLang.value,
+      to: {
+        path: route.path,
+      },
+    },
+    ...langs.map((lang) => ({
+      lang,
+      label: languageLabels[lang] || lang.toUpperCase(),
+      active: currentLang.value === lang,
+      to: {
+        path: route.path,
+        query: {
+          lang,
+        },
+      },
+    })),
+  ]
+})
+
+watch(() => route.query.lang, () => {
+  void loadArticle()
+})
+
+useSeoMeta({
+  title: () => article.value?.title,
+  description: () => article.value?.description,
+  ogDescription: () => article.value?.description,
+  ogUrl: () => `${config.public.host}/articles/${route.params.title}`,
+  ogTitle: () => article.value?.title,
+  twitterCard: 'summary',
+})
+
+const unlock = async function () {
+  await loadArticle()
+}
 </script>
 
 <style scoped>
+.translation-links {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  margin: -2.5rem 0 2.5rem;
+  font-size: 0.9rem;
+}
+
+.translation-links a {
+  color: #777;
+  text-decoration: none;
+}
+
+.translation-links a:hover,
+.translation-links a.active {
+  color: #111;
+  text-decoration: underline;
+}
+
 .date {
   color: #999;
   font-size: 90%;

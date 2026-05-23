@@ -69,6 +69,12 @@ interface Article {
   category?: string
   date: string
   status?: 'public' | 'private'
+  lang?: string
+  sourcePath?: string
+  sourceHash?: string
+  originalTitle?: string
+  requestedLang?: string
+  availableTranslations?: string[]
   path?: string
   _path?: string
   _dir?: string

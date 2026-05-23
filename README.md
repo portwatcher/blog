@@ -18,6 +18,7 @@ I do this because Farbox is not longer updated and maintained, but my blog needs
 - Git-backed content repo through Nuxt Content collections
 - Decap CMS at `/admin`
 - S3-compatible image/video uploads with multipart upload support
+- Generated article translations from the content repo
 
 ## Setup
 
@@ -64,6 +65,15 @@ You content goes here
 ```
 
 Make `status` private will hide your article
+
+Generated translations are read from `translations/**/*.md` in the content repo. Configure visible/generated languages with:
+
+```env
+NUXT_PUBLIC_TRANSLATION_LANGUAGES=en,ja
+NUXT_PUBLIC_ORIGINAL_LANGUAGE=zh
+```
+
+Translated article pages are available with `?lang=<code>` on the original article URL, for example `/articles/Your%20Title?lang=en`.
 
 ### CMS
 
