@@ -82,7 +82,7 @@ export default defineEventHandler((event) => {
   lines.push('    fields:')
   lines.push('      - { label: "Title", name: "title", widget: "string" }')
   lines.push('      - { label: "Description", name: "description", widget: "text", required: false }')
-  lines.push('      - { label: "Category", name: "category", widget: "relation", collection: "categories", search_fields: ["title", "slug"], display_fields: ["title", "slug"], value_field: "slug", default: "Thoughts", options_length: 100 }')
+  lines.push('      - { label: "Category", name: "category", widget: "relation", collection: "categories", search_fields: ["title", "slug"], display_fields: ["title"], value_field: "slug", default: "Thoughts", options_length: 100 }')
   lines.push('      - { label: "Date", name: "date", widget: "datetime", format: "YYYY-MM-DD HH:mm", date_format: "YYYY-MM-DD", time_format: "HH:mm" }')
   lines.push('      - { label: "Status", name: "status", widget: "select", options: ["public", "private"], default: "public" }')
   lines.push('      - { label: "Legacy path", name: "legacyPath", widget: "hidden", required: false }')
