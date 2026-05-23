@@ -33,9 +33,20 @@ export default defineEventHandler((event) => {
           );
         }
 
-        window.addEventListener('message', function (event) {
-          if (event.origin !== targetOrigin || event.data !== authorizingMessage) return;
+        async function validateToken(token) {
+          if (!${tokenRequired ? 'true' : 'false'}) return true;
 
+          var response = await fetch('/admin/github-api/user', {
+            cache: 'no-store',
+            headers: {
+              authorization: 'token ' + token
+            }
+          });
+
+          return response.ok;
+        }
+
+        async function requestToken() {
           var token = ${tokenRequired ? 'window.prompt("CMS admin token")' : '"local-dev"'};
           if (!token) {
             post('error', { message: 'CMS admin token required' });
@@ -43,8 +54,26 @@ export default defineEventHandler((event) => {
             return;
           }
 
+          try {
+            if (!(await validateToken(token))) {
+              window.alert('Invalid CMS admin token.');
+              requestToken();
+              return;
+            }
+          } catch (error) {
+            window.alert('Could not validate the CMS admin token.');
+            requestToken();
+            return;
+          }
+
           post('success', { token: token });
           window.close();
+        }
+
+        window.addEventListener('message', function (event) {
+          if (event.origin !== targetOrigin || event.data !== authorizingMessage) return;
+
+          requestToken();
         });
 
         if (!window.opener) {
