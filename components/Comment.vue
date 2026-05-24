@@ -1,51 +1,70 @@
 <template>
-  <div class="giscus"></div>
+  <div
+    ref="commentContainer"
+    class="giscus"
+  ></div>
 </template>
 
 <script setup lang="ts">
 import { type GiscusProps } from '@giscus/vue'
 
-if (import.meta.client) {
+const props = defineProps<{
+  discussionTerm?: string
+}>()
+
+const commentContainer = ref<HTMLElement | null>(null)
+let scriptTag: HTMLScriptElement | null = null
+
+const createGiscusScript = () => {
   const giscusConfig = useRuntimeConfig().public.giscus as GiscusProps
 
-  const scriptTag = document.createElement('script')
+  const tag = document.createElement('script')
 
-  if (scriptTag) {
-    scriptTag.src = 'https://giscus.app/client.js'
-    scriptTag.setAttribute('data-repo', giscusConfig.repo)
-    scriptTag.setAttribute('data-repo-id', giscusConfig.repoId)
-    scriptTag.setAttribute('data-mapping', giscusConfig.mapping)
-    scriptTag.setAttribute('crossorigin', 'anonymous')
+  tag.src = 'https://giscus.app/client.js'
+  tag.setAttribute('data-repo', giscusConfig.repo)
+  tag.setAttribute('data-repo-id', giscusConfig.repoId)
+  tag.setAttribute('data-mapping', props.discussionTerm ? 'specific' : giscusConfig.mapping)
+  tag.setAttribute('crossorigin', 'anonymous')
 
-    if (giscusConfig.categoryId) {
-      scriptTag.setAttribute('data-category-id', giscusConfig.categoryId)
-    }
-    if (giscusConfig.category) {
-      scriptTag.setAttribute('data-category', giscusConfig.category)
-    }
-    if (giscusConfig.reactionsEnabled) {
-      scriptTag.setAttribute('data-reactions-enabled', giscusConfig.reactionsEnabled)
-    }
-    if (giscusConfig.inputPosition) {
-      scriptTag.setAttribute('data-input-position', giscusConfig.inputPosition)
-    }
-    if (giscusConfig.emitMetadata) {
-      scriptTag.setAttribute('data-emit-metadata', giscusConfig.emitMetadata)
-    }
-    if (giscusConfig.theme) {
-      scriptTag.setAttribute('data-theme', giscusConfig.theme)
-    }
-    if (giscusConfig.lang) {
-      scriptTag.setAttribute('data-lang', giscusConfig.lang)
-    }
+  if (props.discussionTerm) {
+    tag.setAttribute('data-term', props.discussionTerm)
+  }
+  if (giscusConfig.categoryId) {
+    tag.setAttribute('data-category-id', giscusConfig.categoryId)
+  }
+  if (giscusConfig.category) {
+    tag.setAttribute('data-category', giscusConfig.category)
+  }
+  if (giscusConfig.reactionsEnabled) {
+    tag.setAttribute('data-reactions-enabled', giscusConfig.reactionsEnabled)
+  }
+  if (giscusConfig.inputPosition) {
+    tag.setAttribute('data-input-position', giscusConfig.inputPosition)
+  }
+  if (giscusConfig.emitMetadata) {
+    tag.setAttribute('data-emit-metadata', giscusConfig.emitMetadata)
+  }
+  if (giscusConfig.theme) {
+    tag.setAttribute('data-theme', giscusConfig.theme)
+  }
+  if (giscusConfig.lang) {
+    tag.setAttribute('data-lang', giscusConfig.lang)
   }
 
-  onMounted(async () => {
-    document.head.appendChild(scriptTag)
+  return tag
+}
+
+if (import.meta.client) {
+
+  onMounted(() => {
+    if (!commentContainer.value) return
+
+    scriptTag = createGiscusScript()
+    commentContainer.value.appendChild(scriptTag)
   })
 
   onUnmounted(() => {
-    scriptTag.remove()
+    scriptTag?.remove()
   })
 }
 </script>

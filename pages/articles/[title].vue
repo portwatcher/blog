@@ -47,7 +47,10 @@
       @{{ article.date }}
     </div>
 
-    <Comment></Comment>
+    <Comment
+      :key="commentDiscussionTerm"
+      :discussion-term="commentDiscussionTerm"
+    ></Comment>
   </div>
   <NotFound v-else></NotFound>
 </template>
@@ -75,6 +78,9 @@ const currentLang = computed(() => String(route.query.lang || ''))
 const sourceLang = computed(() => String(article.value?.sourceLang || config.public.originalLanguage || 'zh'))
 const availableTranslations = computed(() => article.value?.availableTranslations ?? [])
 const autoLanguageSelectionAttempted = ref(Boolean(currentLang.value))
+const commentDiscussionTerm = computed(() =>
+  String(article.value?.originalTitle || route.params.title || article.value?.title || '').trim(),
+)
 
 const getArticleQuery = () => ({
   title: route.params.title,
