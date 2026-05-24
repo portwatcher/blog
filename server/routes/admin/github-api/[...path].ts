@@ -50,7 +50,7 @@ export default defineEventHandler(async (event) => {
 
   const body = method === 'GET' || method === 'HEAD'
     ? undefined
-    : await readRawBody(event, false)
+    : await readRawBody(event, false) as unknown as BodyInit
   const response = await fetch(targetURL, {
     method,
     headers,

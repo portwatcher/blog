@@ -1,3 +1,5 @@
+import { getCmsAuthMode } from '../../utils/cms-github'
+
 const yamlString = (value: unknown) => JSON.stringify(String(value ?? ''))
 
 const yamlBoolean = (value: unknown) => value === true || value === 'true' || value === '1'
@@ -28,6 +30,7 @@ export default defineEventHandler((event) => {
   const config = useRuntimeConfig(event)
   const publicConfig = config.public
   const backendName = String(publicConfig.cmsBackendName || 'github')
+  const cmsAuthMode = getCmsAuthMode(event)
   const cmsOrigin = getCmsOrigin(event, publicConfig.host)
   const lines: string[] = []
 
@@ -45,7 +48,9 @@ export default defineEventHandler((event) => {
   if (backendName === 'github') {
     lines.push(`  base_url: ${yamlString(publicConfig.cmsBaseUrl || cmsOrigin)}`)
     lines.push(`  auth_endpoint: ${yamlString(publicConfig.cmsAuthEndpoint || 'admin/auth')}`)
-    lines.push(`  api_root: ${yamlString(publicConfig.cmsApiRoot || `${cmsOrigin}/admin/github-api`)}`)
+    if (publicConfig.cmsApiRoot || cmsAuthMode !== 'github-oauth') {
+      lines.push(`  api_root: ${yamlString(publicConfig.cmsApiRoot || `${cmsOrigin}/admin/github-api`)}`)
+    }
   } else if (publicConfig.cmsBaseUrl) {
     lines.push(`  base_url: ${yamlString(publicConfig.cmsBaseUrl)}`)
   }

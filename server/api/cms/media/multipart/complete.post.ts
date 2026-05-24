@@ -5,7 +5,7 @@ import {
 import { backupManagedMediaToGitLfs } from '../../../../utils/git-lfs-backup'
 
 export default defineEventHandler(async (event) => {
-  assertCmsUploadAuthorized(event)
+  await assertCmsUploadAuthorized(event)
 
   const body = await readBody<{
     key?: string

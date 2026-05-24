@@ -112,8 +112,12 @@ export default defineNuxtConfig({
     cmsLfsCommitMessagePrefix: 'Backup media',
     cmsAdminToken: '',
     cmsGithubAuthToken: '',
+    cmsGithubOAuthClientId: '',
+    cmsGithubOAuthClientSecret: '',
+    cmsGithubOAuthScope: 'repo',
     public: {
       mediaBaseUrl: '',
+      cmsAuthMode: 'proxy-token',
       cmsBackendName: 'github',
       cmsContentRepo: '',
       cmsContentBranch: 'main',

@@ -2,7 +2,7 @@ import { assertCmsUploadAuthorized } from '../../../utils/s3-media'
 import { backupManagedMediaToGitLfs } from '../../../utils/git-lfs-backup'
 
 export default defineEventHandler(async (event) => {
-  assertCmsUploadAuthorized(event)
+  await assertCmsUploadAuthorized(event)
 
   const body = await readBody<{
     key?: string

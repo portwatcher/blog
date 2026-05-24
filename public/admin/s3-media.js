@@ -60,6 +60,40 @@
     return window.sessionStorage.getItem('blogCmsUploadToken') || '';
   }
 
+  function findToken(value, depth) {
+    if (!value || depth > 4) return '';
+
+    if (typeof value === 'string') return '';
+    if (typeof value !== 'object') return '';
+
+    var direct = value.token || value.access_token || value.accessToken || value.oauthToken;
+    if (typeof direct === 'string' && direct) return direct;
+
+    for (var key in value) {
+      if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+      var nested = findToken(value[key], depth + 1);
+      if (nested) return nested;
+    }
+
+    return '';
+  }
+
+  function getCmsGithubToken() {
+    var keys = ['decap-cms-user', 'netlify-cms-user'];
+
+    for (var index = 0; index < keys.length; index += 1) {
+      var raw = window.localStorage.getItem(keys[index]);
+      if (!raw) continue;
+
+      try {
+        var token = findToken(JSON.parse(raw), 0);
+        if (token) return token;
+      } catch (_error) {}
+    }
+
+    return '';
+  }
+
   function setUploadToken(token) {
     if (token) window.sessionStorage.setItem('blogCmsUploadToken', token);
   }
@@ -67,7 +101,9 @@
   async function cmsJson(url, body, retried) {
     var headers = { 'content-type': 'application/json' };
     var token = getUploadToken();
+    var githubToken = getCmsGithubToken();
     if (token) headers['x-cms-upload-token'] = token;
+    if (githubToken) headers.authorization = 'Bearer ' + githubToken;
 
     var response = await fetch(url, {
       method: 'POST',

@@ -10,6 +10,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { createError, getHeader, type H3Event } from 'h3'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { useRuntimeConfig } from '#imports'
+import { assertCmsGitHubTokenCanWriteContentRepo, getCmsAuthMode } from './cms-github'
 
 const mb = 1024 * 1024
 const minMultipartPartSize = 5 * mb
@@ -83,32 +84,47 @@ export const getS3MediaConfig = (event?: H3Event): S3MediaConfig => {
   }
 }
 
-export const assertCmsUploadAuthorized = (event: H3Event) => {
-  const config = getS3MediaConfig(event)
+const getAuthorizationToken = (event: H3Event) => {
+  const authorization = getHeader(event, 'authorization') || ''
+  const match = authorization.match(/^(?:token|bearer)\s+(.+)$/i)
 
-  if (!config.uploadToken) {
-    if (process.env.NODE_ENV === 'production') {
-      throw createError({
-        statusCode: 500,
-        statusMessage: 'CMS_UPLOAD_TOKEN must be set before media uploads are enabled',
-      })
+  return match?.[1] || ''
+}
+
+export const assertCmsUploadAuthorized = async (event: H3Event) => {
+  const config = getS3MediaConfig(event)
+  const provided = getHeader(event, 'x-cms-upload-token') || ''
+
+  if (config.uploadToken) {
+    const providedBuffer = Buffer.from(provided)
+    const expectedBuffer = Buffer.from(config.uploadToken)
+
+    if (
+      providedBuffer.length === expectedBuffer.length &&
+      timingSafeEqual(providedBuffer, expectedBuffer)
+    ) {
+      return
     }
+  }
+
+  if (getCmsAuthMode(event) === 'github-oauth') {
+    const githubToken = getAuthorizationToken(event)
+    if (githubToken) {
+      await assertCmsGitHubTokenCanWriteContentRepo(event, githubToken)
+      return
+    }
+  }
+
+  if (!config.uploadToken && process.env.NODE_ENV !== 'production') {
     return
   }
 
-  const provided = getHeader(event, 'x-cms-upload-token') || ''
-  const providedBuffer = Buffer.from(provided)
-  const expectedBuffer = Buffer.from(config.uploadToken)
-
-  if (
-    providedBuffer.length !== expectedBuffer.length ||
-    !timingSafeEqual(providedBuffer, expectedBuffer)
-  ) {
-    throw createError({
-      statusCode: 401,
-      statusMessage: 'CMS upload token required',
-    })
-  }
+  throw createError({
+    statusCode: config.uploadToken ? 401 : 500,
+    statusMessage: config.uploadToken
+      ? 'CMS upload token or GitHub authorization required'
+      : 'CMS_UPLOAD_TOKEN must be set before media uploads are enabled unless GitHub OAuth is enabled',
+  })
 }
 
 export const createS3Client = (config = getS3MediaConfig()) => {

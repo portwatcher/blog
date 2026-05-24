@@ -18,8 +18,16 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE: ghcr.io/portwatcher/blog
-  IMAGE_TAG: develop
+  IMAGE: ${{ vars.IMAGE || format('ghcr.io/{0}', github.repository) }}
+  IMAGE_TAG: ${{ vars.IMAGE_TAG || github.ref_name }}
+  CONTENT_REPO: ${{ vars.CONTENT_REPO || format('{0}/blog-content', github.repository_owner) }}
+  CONTENT_BRANCH: ${{ vars.CONTENT_BRANCH || 'main' }}
+  MEDIA_BASE_URL: ${{ vars.MEDIA_BASE_URL || 'https://jury-files.sgp1.digitaloceanspaces.com' }}
+  BLOG_CONTENT_REPOSITORY: ${{ vars.BLOG_CONTENT_REPOSITORY || '' }}
+  KUBE_CONFIG_PRESENT: ${{ secrets.KUBE_CONFIG != '' }}
+  KUBE_NAMESPACE: ${{ vars.KUBE_NAMESPACE || 'perohub' }}
+  KUBE_DEPLOYMENT: ${{ vars.KUBE_DEPLOYMENT || 'blog' }}
+  KUBE_CONTAINER: ${{ vars.KUBE_CONTAINER || 'blog' }}
 
 jobs:
   deploy:
@@ -48,16 +56,20 @@ jobs:
             ${{ env.IMAGE }}:${{ env.IMAGE_TAG }}
             ${{ env.IMAGE }}:${{ github.sha }}
           build-args: |
-            NUXT_PUBLIC_CMS_CONTENT_REPO=portwatcher/blog-content
-            NUXT_PUBLIC_CMS_CONTENT_BRANCH=main
-            NUXT_PUBLIC_MEDIA_BASE_URL=https://jury-files.sgp1.digitaloceanspaces.com
+            BLOG_CONTENT_BRANCH=${{ env.CONTENT_BRANCH }}
+            BLOG_CONTENT_REPOSITORY=${{ env.BLOG_CONTENT_REPOSITORY }}
+            NUXT_PUBLIC_CMS_CONTENT_REPO=${{ env.CONTENT_REPO }}
+            NUXT_PUBLIC_CMS_CONTENT_BRANCH=${{ env.CONTENT_BRANCH }}
+            NUXT_PUBLIC_MEDIA_BASE_URL=${{ env.MEDIA_BASE_URL }}
           secrets: |
             blog_content_auth_token=${{ secrets.BLOG_CONTENT_AUTH_TOKEN }}
 
       - name: Set up kubectl
+        if: env.KUBE_CONFIG_PRESENT == 'true'
         uses: azure/setup-kubectl@v4
 
       - name: Configure kubeconfig
+        if: env.KUBE_CONFIG_PRESENT == 'true'
         env:
           KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
         run: |
@@ -66,7 +78,8 @@ jobs:
           chmod 600 ~/.kube/config
 
       - name: Restart production deployment
+        if: env.KUBE_CONFIG_PRESENT == 'true'
         run: |
-          kubectl -n perohub set image deployment/blog blog=${IMAGE}:${IMAGE_TAG}
-          kubectl -n perohub rollout restart deployment/blog
-          kubectl -n perohub rollout status deployment/blog --timeout=300s
+          kubectl -n "${KUBE_NAMESPACE}" set image "deployment/${KUBE_DEPLOYMENT}" "${KUBE_CONTAINER}=${IMAGE}:${IMAGE_TAG}"
+          kubectl -n "${KUBE_NAMESPACE}" rollout restart "deployment/${KUBE_DEPLOYMENT}"
+          kubectl -n "${KUBE_NAMESPACE}" rollout status "deployment/${KUBE_DEPLOYMENT}" --timeout=300s

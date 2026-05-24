@@ -4,7 +4,7 @@ import {
 } from '../../../../utils/s3-media'
 
 export default defineEventHandler(async (event) => {
-  assertCmsUploadAuthorized(event)
+  await assertCmsUploadAuthorized(event)
 
   const body = await readBody<{
     filename?: string
