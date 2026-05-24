@@ -23,15 +23,31 @@ const parseCsv = (value: unknown) =>
     .map((item) => item.trim())
     .filter(Boolean)
 
-const getRequestedTranslationLang = (queryLang: unknown, config: ReturnType<typeof useRuntimeConfig>) => {
+const normalizeLanguage = (lang: unknown) => String(lang || '').trim().toLowerCase()
+const languageBase = (lang: unknown) => normalizeLanguage(lang).split('-')[0]
+const languagesAlign = (left: unknown, right: unknown) => {
+  const normalizedLeft = normalizeLanguage(left)
+  const normalizedRight = normalizeLanguage(right)
+
+  return normalizedLeft === normalizedRight || languageBase(normalizedLeft) === languageBase(normalizedRight)
+}
+
+const getArticleSourceLang = (article: ArticleDocument, config: ReturnType<typeof useRuntimeConfig>) =>
+  String(article.lang || config.public.originalLanguage || 'zh')
+
+const getRequestedTranslationLang = (
+  queryLang: unknown,
+  config: ReturnType<typeof useRuntimeConfig>,
+  sourceLang: string,
+) => {
   const lang = String(queryLang || '').trim()
   if (!lang) return ''
 
-  const originalLang = String(config.public.originalLanguage || 'zh')
-  if (lang === originalLang || lang === 'original') return ''
+  if (lang === 'original' || languagesAlign(lang, sourceLang)) return ''
 
-  const configured = new Set(parseCsv(config.public.translationLanguages || 'en,ja'))
-  return configured.has(lang) ? lang : ''
+  const configured = parseCsv(config.public.translationLanguages || 'en,ja')
+  const matched = configured.find((configuredLang) => languagesAlign(configuredLang, lang))
+  return matched || ''
 }
 
 const withCompatibilityFields = (article: ArticleDocument) => ({
@@ -51,29 +67,38 @@ const getArticleTranslations = async (event: any, article: ArticleDocument) => {
   return translations.map(withCompatibilityFields)
 }
 
+const getAvailableTranslationLangs = (translations: ArticleDocument[], sourceLang: string) =>
+  Array.from(
+    new Set(
+      translations
+        .map((translation) => String(translation.lang || '').trim())
+        .filter((lang) => lang && !languagesAlign(lang, sourceLang)),
+    ),
+  ).sort()
+
 const getArticleWithTranslation = async (
-  event: any,
   article: ArticleDocument,
   lang: string,
   translations: ArticleDocument[],
+  sourceLang: string,
 ) => {
-  const availableTranslations = Array.from(
-    new Set(translations.map((translation) => String(translation.lang || '')).filter(Boolean)),
-  ).sort()
+  const availableTranslations = getAvailableTranslationLangs(translations, sourceLang)
 
   if (!lang) {
     return {
       ...article,
       requestedLang: '',
+      sourceLang,
       availableTranslations,
     }
   }
 
-  const translation = translations.find((candidate) => String(candidate.lang || '') === lang)
+  const translation = translations.find((candidate) => languagesAlign(candidate.lang, lang))
   if (!translation) {
     return {
       ...article,
       requestedLang: lang,
+      sourceLang,
       availableTranslations,
     }
   }
@@ -88,6 +113,7 @@ const getArticleWithTranslation = async (
     legacyPath: article.legacyPath,
     authenticated: article.authenticated,
     requestedLang: lang,
+    sourceLang,
     availableTranslations,
   }
 }
@@ -127,7 +153,6 @@ export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
   const ip = getClientIP(event)
   const requestedPath = query.path ? String(query.path) : ''
-  const requestedLang = getRequestedTranslationLang(query.lang, config)
 
   if (query.title) {
     queryBuilder.where('title', '=', String(query.title))
@@ -168,10 +193,13 @@ export default defineEventHandler(async (event) => {
       return []
     }
     const translations = await getArticleTranslations(event, doc)
+    const sourceLang = getArticleSourceLang(doc, config)
+    const requestedLang = getRequestedTranslationLang(query.lang, config, sourceLang)
+    const availableTranslations = getAvailableTranslationLangs(translations, sourceLang)
 
     if (doc.status === 'public') {
       // Return as-is for public articles
-      return [await getArticleWithTranslation(event, doc, requestedLang, translations)]
+      return [await getArticleWithTranslation(doc, requestedLang, translations, sourceLang)]
     } else if (doc.status === 'private') {
       // Rate limit unlock attempts and block abusive IPs
       const blockState = isBlocked(ip)
@@ -197,6 +225,9 @@ export default defineEventHandler(async (event) => {
             body: lockedBody,
             description: 'Too many attempts. Try again later.',
             authenticated: false,
+            requestedLang,
+            sourceLang,
+            availableTranslations,
           },
         ]
       }
@@ -226,6 +257,9 @@ export default defineEventHandler(async (event) => {
               body: limitedBody,
               description: 'Rate limit exceeded. Try again later.',
               authenticated: false,
+              requestedLang,
+              sourceLang,
+              availableTranslations,
             },
           ]
         }
@@ -254,6 +288,9 @@ export default defineEventHandler(async (event) => {
             body: lockedBody,
             description: 'This article is private',
             authenticated: false,
+            requestedLang,
+            sourceLang,
+            availableTranslations,
           },
         ]
       } else {
@@ -264,7 +301,7 @@ export default defineEventHandler(async (event) => {
           authenticated: true,
         }
         return [
-          await getArticleWithTranslation(event, unlockedDoc, requestedLang, translations),
+          await getArticleWithTranslation(unlockedDoc, requestedLang, translations, sourceLang),
         ]
       }
     }

@@ -72,7 +72,7 @@ const configuredTranslationLanguages = computed(() =>
 )
 
 const currentLang = computed(() => String(route.query.lang || ''))
-const originalLang = computed(() => String(config.public.originalLanguage || 'zh'))
+const sourceLang = computed(() => String(article.value?.sourceLang || config.public.originalLanguage || 'zh'))
 const availableTranslations = computed(() => article.value?.availableTranslations ?? [])
 const autoLanguageSelectionAttempted = ref(Boolean(currentLang.value))
 
@@ -92,31 +92,37 @@ const languagesAlign = (left: string, right: string) => {
 }
 
 const availableLanguageCodes = computed(() => {
-  const translations = configuredTranslationLanguages.value.filter((lang) =>
-    lang !== originalLang.value && availableTranslations.value.includes(lang),
-  )
+  const codes = [sourceLang.value]
 
-  return [originalLang.value, ...translations]
+  for (const lang of configuredTranslationLanguages.value) {
+    if (languagesAlign(lang, sourceLang.value)) continue
+    if (!availableTranslations.value.some((translationLang) => languagesAlign(translationLang, lang))) continue
+    if (codes.some((code) => languagesAlign(code, lang))) continue
+
+    codes.push(lang)
+  }
+
+  return codes
 })
 
 const activeLang = computed(() => {
   const routeLang = currentLang.value
   if (routeLang && availableLanguageCodes.value.some((lang) => languagesAlign(lang, routeLang))) {
-    return availableLanguageCodes.value.find((lang) => languagesAlign(lang, routeLang)) || originalLang.value
+    return availableLanguageCodes.value.find((lang) => languagesAlign(lang, routeLang)) || sourceLang.value
   }
 
   const articleLang = article.value?.lang
   if (articleLang && availableLanguageCodes.value.some((lang) => languagesAlign(lang, articleLang))) {
-    return availableLanguageCodes.value.find((lang) => languagesAlign(lang, articleLang)) || originalLang.value
+    return availableLanguageCodes.value.find((lang) => languagesAlign(lang, articleLang)) || sourceLang.value
   }
 
-  return originalLang.value
+  return sourceLang.value
 })
 
 const languageRoute = (lang: string) => {
   const query = { ...route.query }
 
-  if (languagesAlign(lang, originalLang.value)) {
+  if (languagesAlign(lang, sourceLang.value)) {
     delete query.lang
   } else {
     query.lang = lang
@@ -151,7 +157,7 @@ const applyBrowserLanguagePreference = async () => {
   autoLanguageSelectionAttempted.value = true
   const preferredLang = getBrowserPreferredLanguage()
 
-  if (!preferredLang || languagesAlign(preferredLang, originalLang.value)) {
+  if (!preferredLang || languagesAlign(preferredLang, sourceLang.value)) {
     return
   }
 

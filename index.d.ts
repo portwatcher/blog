@@ -73,6 +73,7 @@ interface Article {
   sourcePath?: string
   sourceHash?: string
   originalTitle?: string
+  sourceLang?: string
   requestedLang?: string
   availableTranslations?: string[]
   path?: string
