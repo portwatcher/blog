@@ -65,7 +65,7 @@ const languageLabels: Record<string, string> = {
 }
 
 const configuredTranslationLanguages = computed(() =>
-  String(config.public.translationLanguages || 'en,ja')
+  String(config.public.translationLanguages || 'zh,en,ja')
     .split(',')
     .map((lang) => lang.trim())
     .filter(Boolean),

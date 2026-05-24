@@ -69,7 +69,7 @@ Make `status` private will hide your article
 Generated translations are read from `translations/**/*.md` in the content repo. Configure visible/generated languages with:
 
 ```env
-NUXT_PUBLIC_TRANSLATION_LANGUAGES=en,ja
+NUXT_PUBLIC_TRANSLATION_LANGUAGES=zh,en,ja
 NUXT_PUBLIC_ORIGINAL_LANGUAGE=zh
 ```
 

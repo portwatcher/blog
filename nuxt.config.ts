@@ -121,7 +121,7 @@ export default defineNuxtConfig({
       cmsAuthEndpoint: '',
       cmsApiRoot: '',
       cmsLocalBackend: false,
-      translationLanguages: 'en,ja',
+      translationLanguages: 'zh,en,ja',
       originalLanguage: 'zh',
       title: 'blog',
       description: 'this is my blog',

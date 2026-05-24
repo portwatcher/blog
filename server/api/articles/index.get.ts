@@ -45,7 +45,7 @@ const getRequestedTranslationLang = (
 
   if (lang === 'original' || languagesAlign(lang, sourceLang)) return ''
 
-  const configured = parseCsv(config.public.translationLanguages || 'en,ja')
+  const configured = parseCsv(config.public.translationLanguages || 'zh,en,ja')
   const matched = configured.find((configuredLang) => languagesAlign(configuredLang, lang))
   return matched || ''
 }
