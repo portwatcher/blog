@@ -91,6 +91,12 @@ const languagesAlign = (left: string, right: string) => {
   return normalizedLeft === normalizedRight || languageBase(normalizedLeft) === languageBase(normalizedRight)
 }
 
+const getLanguageLabel = (lang: string) => {
+  const label = languageLabels[lang] || languageLabels[languageBase(lang)] || lang.toUpperCase()
+
+  return languagesAlign(lang, sourceLang.value) ? `${label}(original)` : label
+}
+
 const availableLanguageCodes = computed(() => {
   const codes = [sourceLang.value]
 
@@ -178,7 +184,7 @@ await loadArticle()
 const languageTabs = computed(() =>
   availableLanguageCodes.value.map((lang) => ({
     lang,
-    label: languageLabels[lang] || lang.toUpperCase(),
+    label: getLanguageLabel(lang),
     active: languagesAlign(activeLang.value, lang),
     to: languageRoute(lang),
   })),
