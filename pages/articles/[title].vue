@@ -177,6 +177,25 @@ const applyBrowserLanguagePreference = async () => {
   await router.replace(languageRoute(preferredLang))
 }
 
+const applyMarkdownImageLayout = async () => {
+  if (!import.meta.client) return
+
+  await nextTick()
+
+  document.querySelectorAll<HTMLImageElement>('.markdown img').forEach((image) => {
+    const updateImageOrientation = () => {
+      image.classList.toggle('markdown-image-tall', image.naturalHeight > image.naturalWidth)
+    }
+
+    if (image.complete && image.naturalWidth && image.naturalHeight) {
+      updateImageOrientation()
+      return
+    }
+
+    image.addEventListener('load', updateImageOrientation, { once: true })
+  })
+}
+
 const loadArticle = async () => {
   const articles = await $fetch<Article[]>('/api/articles', {
     method: 'GET',
@@ -199,6 +218,7 @@ const languageTabs = computed(() =>
 
 onMounted(() => {
   void applyBrowserLanguagePreference()
+  void applyMarkdownImageLayout()
 })
 
 watch(
@@ -211,6 +231,7 @@ watch(
     void (async () => {
       await loadArticle()
       await applyBrowserLanguagePreference()
+      await applyMarkdownImageLayout()
     })()
   },
 )
@@ -303,10 +324,10 @@ const unlock = async function () {
   line-height: 1.2;
 }
 
-.post p:has(> img),
-.post p:has(> video) {
-  display: flex;
-  justify-content: center;
+.markdown p:has(> img),
+.markdown p:has(> video) {
+  display: block;
+  clear: both;
   padding: 1em 0;
 }
 
@@ -326,8 +347,20 @@ const unlock = async function () {
   margin: 1rem;
 }
 
-.post img {
-  max-width: 100%;
+.markdown img {
+  display: block;
+  float: none !important;
+  clear: both;
+  width: 100% !important;
+  max-width: 100% !important;
+  height: auto !important;
+  margin: 1rem auto;
+  object-fit: contain;
+}
+
+.markdown img.markdown-image-tall {
+  width: auto !important;
+  max-height: 40vh !important;
 }
 
 .post code {
@@ -378,14 +411,6 @@ const unlock = async function () {
   text-align: right;
   border-top: 1px solid #eee;
   border-bottom: 1px solid #eee;
-}
-
-.post .content p img {
-  margin-left: -2em;
-}
-
-.post .content .refer p img {
-  margin-left: 0;
 }
 
 .post a {
