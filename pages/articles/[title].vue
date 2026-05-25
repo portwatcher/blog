@@ -342,6 +342,12 @@ const unlock = async function () {
   background-color: inherit;
 }
 
+.markdown pre code:not([class*="language-"]) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .post .content {
   margin: 0 0 3em 0;
 }
