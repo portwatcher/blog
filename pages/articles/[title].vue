@@ -17,6 +17,7 @@
           :key="tab.lang"
           class="language-tab"
           :to="tab.to"
+          replace
           :class="{ active: tab.active }"
           :aria-selected="tab.active"
           role="tab"
@@ -283,7 +284,8 @@ const unlock = async function () {
 .post p {
   line-height: 1.75;
   margin-bottom: 0.6em;
-  overflow-x: auto;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .post {
@@ -410,6 +412,7 @@ const unlock = async function () {
   border-bottom-right-radius: 0.5rem;
   margin-top: 3em;
   margin-bottom: 3em;
+  overflow-wrap: anywhere;
 }
 
 .markdown pre {
