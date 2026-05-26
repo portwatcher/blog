@@ -322,8 +322,10 @@ const unlock = async function () {
   box-sizing: border-box;
   color: var(--color-text);
   font-family: var(--font-sans);
-  font-size: 1.0625rem;
-  line-height: 1.72;
+  font-size: 1.1875rem;
+  line-height: 1.92;
+  letter-spacing: 0;
+  word-spacing: 0.04em;
   overflow-wrap: break-word;
   word-break: normal;
   line-break: loose;
@@ -336,7 +338,7 @@ const unlock = async function () {
 
 .markdown :where(p, blockquote, ul, ol, dl, table, pre, details) {
   margin-top: 0;
-  margin-bottom: 1rem;
+  margin-bottom: 1.35em;
 }
 
 .markdown :where(p, li, blockquote) {
@@ -355,10 +357,10 @@ const unlock = async function () {
   font-size: clamp(2rem, 1.72rem + 1.15vw, 2.75rem);
   font-weight: 720;
   letter-spacing: 0;
-  padding: 0.5rem 0 1.5rem;
+  padding: 0.5rem 0 2rem;
   margin: 0;
   text-align: center;
-  line-height: 1.16;
+  line-height: 1.2;
   text-wrap: balance;
   overflow-wrap: anywhere;
 }
@@ -367,7 +369,7 @@ const unlock = async function () {
 .markdown p:has(> video) {
   display: block;
   clear: both;
-  padding: 0.5rem 0;
+  padding: 1rem 0;
 }
 
 .post video {
@@ -393,7 +395,7 @@ const unlock = async function () {
   width: 100% !important;
   max-width: 100% !important;
   height: auto !important;
-  margin: 1.5rem auto;
+  margin: 2rem auto;
   object-fit: contain;
   border-radius: 0.375rem;
 }
@@ -409,7 +411,7 @@ const unlock = async function () {
   border-radius: 0.375rem;
   margin: 0;
   font-family: var(--font-mono);
-  font-size: 0.88em;
+  font-size: 0.9em;
 }
 
 .post pre code {
@@ -457,22 +459,32 @@ const unlock = async function () {
   border-bottom: 1px solid var(--color-border);
 }
 
-.post a {
+.markdown a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.markdown :where(p, li, blockquote, td) a {
   color: var(--color-link);
   text-decoration: underline;
   text-decoration-thickness: 0.08em;
   text-underline-offset: 0.18em;
 }
 
-.post a:hover {
+.markdown :where(p, li, blockquote, td) a:hover {
   text-decoration-thickness: 0.12em;
+}
+
+.markdown :where(h1, h2, h3, h4, h5, h6) a {
+  color: inherit;
+  text-decoration: none;
 }
 
 .markdown .toc {
   line-height: 1.7;
   border: 1px solid var(--color-border);
   border-radius: 0.375rem;
-  padding: 1rem 1.25rem;
+  padding: 1.1rem 1.25rem;
   background: var(--color-subtle);
 }
 
@@ -488,63 +500,63 @@ const unlock = async function () {
 
 .markdown blockquote {
   color: var(--color-muted);
-  padding: 0.85rem 1rem;
   font-style: normal;
   background-color: var(--color-subtle);
   border: 1px solid var(--color-border);
   border-radius: 0.375rem;
-  margin-top: 1.5rem;
-  margin-bottom: 1.5rem;
+  margin-top: 2rem;
+  margin-bottom: 2rem;
+  padding: 1.1rem 1.25rem;
   overflow-wrap: break-word;
 }
 
 .markdown pre {
   border: 1px solid var(--color-soft-border);
   border-radius: 0.5rem;
-  margin-top: 1rem;
-  margin-bottom: 1.5rem;
-  padding: 1rem;
+  margin-top: 1.25rem;
+  margin-bottom: 2rem;
+  padding: 1.1rem 1.25rem;
   display: block;
   overflow: auto;
   background: var(--color-subtle);
   font-family: var(--font-mono);
-  font-size: 0.875rem;
-  line-height: 1.55;
+  font-size: 0.95rem;
+  line-height: 1.75;
 }
 
 .markdown h1 {
-  margin: 2.5rem 0 1rem;
+  margin: 3.25rem 0 1.35rem;
   padding-bottom: 0.3rem;
   border-bottom: 1px solid var(--color-border);
   color: var(--color-heading);
   font-family: var(--font-sans);
   font-size: 1.75em;
   font-weight: 680;
-  line-height: 1.25;
+  line-height: 1.32;
   text-wrap: pretty;
   overflow-wrap: break-word;
 }
 
 .markdown h2 {
-  margin: 2rem 0 0.85rem;
+  margin: 2.85rem 0 1.15rem;
   padding-bottom: 0.25rem;
   border-bottom: 1px solid var(--color-soft-border);
   color: var(--color-heading);
   font-family: var(--font-sans);
   font-size: 1.45em;
   font-weight: 660;
-  line-height: 1.3;
+  line-height: 1.36;
   text-wrap: pretty;
   overflow-wrap: break-word;
 }
 
 .markdown h3 {
   font-size: 1.2em;
-  margin: 1.75rem 0 0.75rem;
+  margin: 2.4rem 0 1rem;
   color: var(--color-heading);
   font-family: var(--font-sans);
   font-weight: 650;
-  line-height: 1.35;
+  line-height: 1.42;
   text-wrap: pretty;
   overflow-wrap: break-word;
 }
@@ -556,7 +568,7 @@ const unlock = async function () {
   overflow: auto;
   border-spacing: 0;
   border-collapse: collapse;
-  margin: 1.5rem 0 2rem;
+  margin: 2rem 0 2.6rem;
 }
 
 .markdown strong,
@@ -579,7 +591,7 @@ const unlock = async function () {
   height: 1px;
   border: 0;
   background: var(--color-border);
-  margin: 2rem 0;
+  margin: 3rem 0;
 }
 
 .markdown ul,
@@ -591,12 +603,12 @@ const unlock = async function () {
 }
 
 .markdown li + li {
-  margin-top: 0.25rem;
+  margin-top: 0.45rem;
 }
 
 .markdown li > :where(p, ul, ol) {
-  margin-top: 0.35rem;
-  margin-bottom: 0.35rem;
+  margin-top: 0.55rem;
+  margin-bottom: 0.55rem;
 }
 
 @supports (word-break: auto-phrase) {
@@ -612,8 +624,9 @@ const unlock = async function () {
 @media (max-width: 640px) {
   .post {
     width: 100%;
-    font-size: 1rem;
-    line-height: 1.76;
+    font-size: 1.125rem;
+    line-height: 1.9;
+    word-spacing: 0.03em;
   }
 
   .post .title {
@@ -623,7 +636,7 @@ const unlock = async function () {
 
   .markdown h1 {
     font-size: 1.55em;
-    line-height: 1.32;
+    line-height: 1.38;
   }
 
   .markdown h2 {
