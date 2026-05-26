@@ -63,6 +63,7 @@
 
               <Paginator
                 v-if="total && total > itemsPerPage"
+                :first="(page - 1) * itemsPerPage"
                 :rows="itemsPerPage"
                 :total-records="total"
                 @page="$event => page = $event.page + 1"
@@ -77,17 +78,128 @@
 
 
 <script setup lang="ts">
-const itemTypes = ['book', 'tv', 'movie']
+const itemTypes = ['book', 'tv', 'movie'] as const
 const shelfTypes: ShelfType[] = ['complete', 'progress', 'wishlist']
 
-const itemType = ref<string>(itemTypes[0])
-const shelfType = ref<ShelfType>(shelfTypes[0])
-const rating = ref<number>(5)
-const minRating = ref<number>(9)
-const maxRating = ref<number>(10)
-const page = ref(1)
+type ItemType = typeof itemTypes[number]
+
+interface ShelfQueryState {
+  category: ItemType
+  type: ShelfType
+  rating: number
+  page: number
+}
+
+const defaultShelfQuery: ShelfQueryState = {
+  category: itemTypes[0],
+  type: shelfTypes[0],
+  rating: 5,
+  page: 1,
+}
+
+const route = useRoute()
+const router = useRouter()
 const { t } = useI18n()
 const config = useRuntimeConfig()
+
+const firstQueryValue = (value: unknown) => {
+  return Array.isArray(value) ? value[0] : value
+}
+
+const normalizeItemType = (value: unknown): ItemType => {
+  const queryValue = firstQueryValue(value)
+
+  return typeof queryValue === 'string' && itemTypes.includes(queryValue as ItemType)
+    ? queryValue as ItemType
+    : defaultShelfQuery.category
+}
+
+const normalizeShelfType = (value: unknown): ShelfType => {
+  const queryValue = firstQueryValue(value)
+
+  return typeof queryValue === 'string' && shelfTypes.includes(queryValue as ShelfType)
+    ? queryValue as ShelfType
+    : defaultShelfQuery.type
+}
+
+const normalizeRating = (value: unknown): number => {
+  const ratingValue = Number(firstQueryValue(value))
+
+  return Number.isInteger(ratingValue) && ratingValue >= 1 && ratingValue <= 5
+    ? ratingValue
+    : defaultShelfQuery.rating
+}
+
+const normalizePage = (value: unknown): number => {
+  const pageValue = Number(firstQueryValue(value))
+
+  return Number.isInteger(pageValue) && pageValue >= 1
+    ? pageValue
+    : defaultShelfQuery.page
+}
+
+const shelfQuery = computed<ShelfQueryState>(() => ({
+  category: normalizeItemType(route.query.category),
+  type: normalizeShelfType(route.query.type),
+  rating: normalizeRating(route.query.rating),
+  page: normalizePage(route.query.page),
+}))
+
+const updateShelfQuery = (query: Partial<ShelfQueryState>) => {
+  const nextQuery = {
+    ...shelfQuery.value,
+    ...query,
+  }
+  const {
+    category: _category,
+    type: _type,
+    rating: _rating,
+    page: _page,
+    minRating: _minRating,
+    maxRating: _maxRating,
+    ...remainingQuery
+  } = route.query
+
+  router.replace({
+    query: {
+      ...remainingQuery,
+      category: nextQuery.category,
+      type: nextQuery.type,
+      rating: String(nextQuery.rating),
+      page: String(nextQuery.page),
+    },
+  })
+}
+
+const itemType = computed<ItemType>({
+  get: () => shelfQuery.value.category,
+  set: category => updateShelfQuery({
+    category: normalizeItemType(category),
+    type: defaultShelfQuery.type,
+    page: defaultShelfQuery.page,
+  }),
+})
+const shelfType = computed<ShelfType>({
+  get: () => shelfQuery.value.type,
+  set: type => updateShelfQuery({
+    type: normalizeShelfType(type),
+    page: defaultShelfQuery.page,
+  }),
+})
+const rating = computed<number>({
+  get: () => shelfQuery.value.rating,
+  set: rating => updateShelfQuery({
+    rating: normalizeRating(rating),
+  }),
+})
+const page = computed<number>({
+  get: () => shelfQuery.value.page,
+  set: page => updateShelfQuery({
+    page: normalizePage(page),
+  }),
+})
+const minRating = computed(() => rating.value * 2 - 1)
+const maxRating = computed(() => rating.value * 2)
 
 useSeoMeta({
   title: t('shelf'),
@@ -108,20 +220,6 @@ const { data } = await useFetch('/api/shelves', {
 const shelfData = computed(() => data.value?.groupedData)
 const total = computed(() => data.value?.total)
 const itemsPerPage = ITEMS_PER_PAGE
-
-watch(itemType, () => {
-  page.value = 1
-  shelfType.value = shelfTypes[0]
-})
-
-watch(shelfType, () => {
-  page.value = 1
-})
-
-watch(rating, () => {
-  minRating.value = rating.value * 2 - 1
-  maxRating.value = rating.value * 2
-})
 </script>
 
 <style scoped>
