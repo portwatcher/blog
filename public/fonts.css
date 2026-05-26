@@ -3,6 +3,7 @@
   src: url('/fonts/noto/NotoSans-VariableFont_wdth,wght.ttf') format('truetype');
   font-weight: 100 900;
   font-style: normal;
+  font-display: swap;
 }
 
 @font-face {
@@ -11,6 +12,7 @@
     format('truetype');
   font-weight: 100 900;
   font-style: italic;
+  font-display: swap;
 }
 
 /* Noto Serif */
@@ -20,6 +22,7 @@
     format('truetype');
   font-weight: 100 900;
   font-style: normal;
+  font-display: swap;
 }
 
 @font-face {
@@ -28,6 +31,7 @@
     format('truetype');
   font-weight: 100 900;
   font-style: italic;
+  font-display: swap;
 }
 
 @font-face {
@@ -35,6 +39,7 @@
   src: url('/fonts/noto/NotoSerifSC-VariableFont_wght.ttf') format('truetype');
   font-weight: 100 900;
   font-style: normal;
+  font-display: swap;
 }
 
 @font-face {
@@ -42,4 +47,5 @@
   src: url('/fonts/noto/NotoSerifJP-VariableFont_wght.ttf') format('truetype');
   font-weight: 100 900;
   font-style: normal;
+  font-display: swap;
 }

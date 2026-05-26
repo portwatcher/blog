@@ -2,6 +2,7 @@
   <div
     v-if="article"
     class="post"
+    :lang="languageBase(activeLang)"
   >
     <header class="article-header">
       <h1 class="title">{{ article.title }}</h1>
@@ -253,9 +254,9 @@ const unlock = async function () {
 <style scoped>
 .article-header {
   text-align: center;
-  border-bottom: 1px solid #eee;
-  margin: 1em 0 2.75em;
-  padding-top: 0.5em;
+  border-bottom: 1px solid var(--color-border);
+  margin: 0 0 2.5rem;
+  padding-top: 1.25rem;
 }
 
 .language-tabs {
@@ -275,64 +276,101 @@ const unlock = async function () {
   min-height: 2.75rem;
   padding: 0 0.95rem;
   border-bottom: 2px solid transparent;
-  color: #777;
+  color: var(--color-muted);
   text-decoration: none;
 }
 
 .language-tab:hover,
 .language-tab.active {
-  color: #111;
+  color: var(--color-heading);
 }
 
 .language-tab.active {
-  border-bottom-color: #111;
+  border-bottom-color: var(--color-heading);
 }
 
 .date {
-  color: #999;
-  font-size: 90%;
+  color: var(--color-muted);
+  font-size: 0.875rem;
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  border-top: 1px solid #eee;
-  border-bottom: 1px solid #eee;
-  padding: 1em 0;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  padding: 1rem 0;
   margin: 3rem 0;
+}
+
+@media (max-width: 640px) {
+  .article-header {
+    text-align: left;
+  }
+
+  .language-tabs {
+    justify-content: flex-start;
+    padding-left: 0;
+  }
 }
 </style>
 
 <style>
-.post p {
-  line-height: 1.75;
-  margin-bottom: 0.6em;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+.post {
+  width: 100%;
+  max-width: 44rem;
+  min-width: 0;
+  margin: 0 auto;
+  box-sizing: border-box;
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 1.0625rem;
+  line-height: 1.72;
+  overflow-wrap: break-word;
+  word-break: normal;
+  line-break: loose;
+  hanging-punctuation: first allow-end;
 }
 
-.post {
-  font-size: 19px;
-  line-height: 1.8em;
-  color: #222;
+.markdown {
+  font-size: 1em;
+}
+
+.markdown :where(p, blockquote, ul, ol, dl, table, pre, details) {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+
+.markdown :where(p, li, blockquote) {
+  line-height: inherit;
+}
+
+.markdown p {
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: auto;
 }
 
 .post .title {
-  color: #000;
-  font-size: 2.3em;
-  padding: 0.5em 0 1.15em 0;
+  color: var(--color-heading);
+  font-family: var(--font-sans);
+  font-size: clamp(2rem, 1.72rem + 1.15vw, 2.75rem);
+  font-weight: 720;
+  letter-spacing: 0;
+  padding: 0.5rem 0 1.5rem;
   margin: 0;
   text-align: center;
-  line-height: 1.2;
+  line-height: 1.16;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
 }
 
 .markdown p:has(> img),
 .markdown p:has(> video) {
   display: block;
   clear: both;
-  padding: 1em 0;
+  padding: 0.5rem 0;
 }
 
 .post video {
-  margin: 1rem;
   margin-left: auto;
   margin-right: auto;
   max-width: 100%;
@@ -344,7 +382,8 @@ const unlock = async function () {
   display: block;
   margin-left: auto;
   margin-right: auto;
-  margin: 1rem;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
 }
 
 .markdown img {
@@ -354,8 +393,9 @@ const unlock = async function () {
   width: 100% !important;
   max-width: 100% !important;
   height: auto !important;
-  margin: 1rem auto;
+  margin: 1.5rem auto;
   object-fit: contain;
+  border-radius: 0.375rem;
 }
 
 .markdown img.markdown-image-tall {
@@ -364,21 +404,25 @@ const unlock = async function () {
 }
 
 .post code {
-  background-color: #eee;
-  padding: 0.2em 0.3em;
-  border-radius: 0.35rem;
-  margin: 0 0.2em;
-  font-size: 16px;
+  background-color: color-mix(in oklch, var(--color-subtle) 88%, var(--color-border));
+  padding: 0.16em 0.36em;
+  border-radius: 0.375rem;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.88em;
 }
 
 .post pre code {
   background-color: inherit;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
 }
 
 .markdown pre code:not([class*="language-"]) {
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .post .content {
@@ -397,29 +441,39 @@ const unlock = async function () {
 
 .post .content .info .tags a {
   padding: 0 10px;
-  color: #555;
+  color: var(--color-muted);
 }
 
 .post .content .info .tags a:hover {
-  color: #111;
+  color: var(--color-heading);
 }
 
 .post .content .info .date {
-  font-size: 90%;
+  font-size: 0.875rem;
   padding: 1em 0;
-  color: #999;
+  color: var(--color-muted);
   text-align: right;
-  border-top: 1px solid #eee;
-  border-bottom: 1px solid #eee;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .post a {
+  color: var(--color-link);
   text-decoration: underline;
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.18em;
+}
+
+.post a:hover {
+  text-decoration-thickness: 0.12em;
 }
 
 .markdown .toc {
-  line-height: 2.1;
-  border: 1px solid #eee;
+  line-height: 1.7;
+  border: 1px solid var(--color-border);
+  border-radius: 0.375rem;
+  padding: 1rem 1.25rem;
+  background: var(--color-subtle);
 }
 
 .markdown .toc li ul {
@@ -433,62 +487,151 @@ const unlock = async function () {
 }
 
 .markdown blockquote {
-  border-left-color: #16b0ff;
-  border-left-style: solid;
-  border-left-width: 5px;
-  padding: 0.1rem 1rem;
-  font-style: italic;
-  background-color: #eee;
-  border-top-right-radius: 0.5rem;
-  border-bottom-right-radius: 0.5rem;
-  margin-top: 3em;
-  margin-bottom: 3em;
-  overflow-wrap: anywhere;
+  color: var(--color-muted);
+  padding: 0.85rem 1rem;
+  font-style: normal;
+  background-color: var(--color-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: 0.375rem;
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+  overflow-wrap: break-word;
 }
 
 .markdown pre {
-  border: 1px solid #e6e6e6;
-  margin-top: 1.2em;
-  margin-bottom: 2.2em;
-  padding: 15px 20px;
+  border: 1px solid var(--color-soft-border);
+  border-radius: 0.5rem;
+  margin-top: 1rem;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
   display: block;
   overflow: auto;
-  background: #fdfdfd;
+  background: var(--color-subtle);
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1.55;
 }
 
 .markdown h1 {
-  margin: 2.5em 0 1.5em 0;
-  line-height: 1.2;
+  margin: 2.5rem 0 1rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-heading);
+  font-family: var(--font-sans);
+  font-size: 1.75em;
+  font-weight: 680;
+  line-height: 1.25;
+  text-wrap: pretty;
+  overflow-wrap: break-word;
 }
 
 .markdown h2 {
-  margin: 2em 0 1em 0;
+  margin: 2rem 0 0.85rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--color-soft-border);
+  color: var(--color-heading);
+  font-family: var(--font-sans);
+  font-size: 1.45em;
+  font-weight: 660;
+  line-height: 1.3;
+  text-wrap: pretty;
+  overflow-wrap: break-word;
 }
 
 .markdown h3 {
-  font-size: 1.3em;
-  margin: 2em 0 1em 0;
-  color: #333;
+  font-size: 1.2em;
+  margin: 1.75rem 0 0.75rem;
+  color: var(--color-heading);
+  font-family: var(--font-sans);
+  font-weight: 650;
+  line-height: 1.35;
+  text-wrap: pretty;
+  overflow-wrap: break-word;
 }
 
 .markdown table {
-  margin: 2em 0 3em 0;
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow: auto;
+  border-spacing: 0;
+  border-collapse: collapse;
+  margin: 1.5rem 0 2rem;
 }
 
 .markdown strong,
 .markdown b {
-  color: #000;
+  color: var(--color-heading);
+  font-weight: 700;
+}
+
+.markdown :where(th, td) {
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--color-border);
+}
+
+.markdown th {
+  font-weight: 650;
+  background: var(--color-subtle);
 }
 
 .markdown hr {
-  border-top: 1px dotted #efefef;
+  height: 1px;
+  border: 0;
+  background: var(--color-border);
+  margin: 2rem 0;
 }
 
 .markdown ul,
 .markdown ol {
-  line-height: 1.75;
-  margin: 0.8em 0;
+  line-height: inherit;
+  padding-left: 1.45em;
   max-width: 100%;
   overflow-x: auto;
+}
+
+.markdown li + li {
+  margin-top: 0.25rem;
+}
+
+.markdown li > :where(p, ul, ol) {
+  margin-top: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+@supports (word-break: auto-phrase) {
+  .post:lang(zh) {
+    word-break: auto-phrase;
+  }
+
+  .post:lang(zh) .markdown :where(h1, h2, h3) {
+    word-break: auto-phrase;
+  }
+}
+
+@media (max-width: 640px) {
+  .post {
+    width: 100%;
+    font-size: 1rem;
+    line-height: 1.76;
+  }
+
+  .post .title {
+    font-size: 1.9rem;
+    text-align: left;
+  }
+
+  .markdown h1 {
+    font-size: 1.55em;
+    line-height: 1.32;
+  }
+
+  .markdown h2 {
+    font-size: 1.32em;
+  }
+
+  .markdown h3 {
+    font-size: 1.15em;
+  }
 }
 </style>
