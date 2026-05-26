@@ -353,7 +353,7 @@ const unlock = async function () {
 
 .post .title {
   color: var(--color-heading);
-  font-family: var(--font-sans);
+  font-family: var(--font-serif);
   font-size: clamp(2rem, 1.72rem + 1.15vw, 2.75rem);
   font-weight: 720;
   letter-spacing: 0;
@@ -529,7 +529,7 @@ const unlock = async function () {
   padding-bottom: 0.3rem;
   border-bottom: 1px solid var(--color-border);
   color: var(--color-heading);
-  font-family: var(--font-sans);
+  font-family: var(--font-serif);
   font-size: 1.75em;
   font-weight: 680;
   line-height: 1.32;
@@ -542,7 +542,7 @@ const unlock = async function () {
   padding-bottom: 0.25rem;
   border-bottom: 1px solid var(--color-soft-border);
   color: var(--color-heading);
-  font-family: var(--font-sans);
+  font-family: var(--font-serif);
   font-size: 1.45em;
   font-weight: 660;
   line-height: 1.36;
@@ -554,7 +554,7 @@ const unlock = async function () {
   font-size: 1.2em;
   margin: 2.4rem 0 1rem;
   color: var(--color-heading);
-  font-family: var(--font-sans);
+  font-family: var(--font-serif);
   font-weight: 650;
   line-height: 1.42;
   text-wrap: pretty;
