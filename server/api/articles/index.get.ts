@@ -11,6 +11,8 @@ const limit = 10
 
 type ArticleDocument = Record<string, any>
 
+const excerptLength = 180
+
 const getArticleCategory = (article: ArticleDocument) => {
   if (article.category) return String(article.category)
   const path = String(article.path || article._path || '')
@@ -55,6 +57,28 @@ const withCompatibilityFields = (article: ArticleDocument) => ({
   _path: article._path || article.path,
   _dir: article._dir || getArticleCategory(article),
 })
+
+const normalizeDescription = (value: unknown) =>
+  String(value || '').replace(/\s+/g, ' ').trim()
+
+const getTextFromContentNode = (node: any): string => {
+  if (!node) return ''
+  if (typeof node === 'string') return node
+  if (node.type === 'text') return String(node.value || '')
+  if (!Array.isArray(node.children)) return ''
+
+  return node.children.map(getTextFromContentNode).filter(Boolean).join(' ')
+}
+
+const getArticleDescription = (article: ArticleDocument) => {
+  const description = normalizeDescription(article.description)
+  if (description) return description
+
+  const excerpt = normalizeDescription(getTextFromContentNode(article.body))
+  if (excerpt.length <= excerptLength) return excerpt
+
+  return `${excerpt.slice(0, excerptLength).trim()}...`
+}
 
 const getArticleTranslations = async (event: any, article: ArticleDocument) => {
   const originalTitle = String(article.title || '')
@@ -138,6 +162,10 @@ const parseOnlyFields = (only: unknown) => {
       continue
     }
     normalized.add(field)
+  }
+
+  if (normalized.has('description')) {
+    normalized.add('body')
   }
 
   normalized.add('status')
@@ -333,7 +361,7 @@ export default defineEventHandler(async (event) => {
     if (rest?.status === 'private') {
       return { ...rest, description: 'This article is private' }
     }
-    return rest
+    return { ...rest, description: getArticleDescription(d) }
   })
   return safeDocs
 })
