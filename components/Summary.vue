@@ -1,11 +1,11 @@
 <template>
   <div class="summary">
     <h2>
-      <NuxtLink :to="`/articles/${article.title}`">
+      <NuxtLink :to="`/articles/${getArticleRouteTitle(article)}`">
         {{ article.title }}
       </NuxtLink>
     </h2>
-    <NuxtLink :to="`/articles/${article.title}`">
+    <NuxtLink :to="`/articles/${getArticleRouteTitle(article)}`">
       {{ article.description }}
     </NuxtLink>
   </div>

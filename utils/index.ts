@@ -4,4 +4,7 @@ export const capitalize = function (str: string) {
   })
 }
 
+export const getArticleRouteTitle = (article: Pick<Article, 'title' | 'originalTitle'>) =>
+  article.originalTitle || article.title
+
 export const ITEMS_PER_PAGE = 20

@@ -142,9 +142,25 @@ const parseOnlyFields = (only: unknown) => {
 
   normalized.add('status')
   normalized.add('path')
+  normalized.add('lang')
   normalized.add('legacyPath')
 
   return Array.from(normalized)
+}
+
+const getArticleListingDocument = async (
+  event: any,
+  article: ArticleDocument,
+  queryLang: unknown,
+  config: ReturnType<typeof useRuntimeConfig>,
+) => {
+  const sourceLang = getArticleSourceLang(article, config)
+  const requestedLang = getRequestedTranslationLang(queryLang, config, sourceLang)
+
+  if (!requestedLang) return article
+
+  const translations = await getArticleTranslations(event, article)
+  return getArticleWithTranslation(article, requestedLang, translations, sourceLang)
 }
 
 export default defineEventHandler(async (event) => {
@@ -307,8 +323,12 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  const localizedDocs = await Promise.all(
+    docs.map((doc) => getArticleListingDocument(event, doc, query.lang, config)),
+  )
+
   // Listing queries: never include body; mask private descriptions
-  const safeDocs = docs.map((d: any) => {
+  const safeDocs = localizedDocs.map((d: any) => {
     const { body, ...rest } = d || {}
     if (rest?.status === 'private') {
       return { ...rest, description: 'This article is private' }

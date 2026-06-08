@@ -10,12 +10,14 @@
 const route = useRoute()
 const page = Number(route.query.page) ?? 1
 const config = useRuntimeConfig()
+const { locale } = useI18n()
 
 const { data: articles } = await useFetch<Article[]>('/api/articles', {
-  query: {
+  query: computed(() => ({
     category: route.params.category,
     page,
-  },
+    lang: locale.value,
+  })),
 })
 
 useSeoMeta({

@@ -1,6 +1,6 @@
 <template>
   <div class="summary-title">
-    <NuxtLink :to="`/articles/${article.title}`">
+    <NuxtLink :to="`/articles/${getArticleRouteTitle(article)}`">
       {{ article.title }}
     </NuxtLink>
     <span>{{ new Date(article.date).toLocaleDateString() }}</span>

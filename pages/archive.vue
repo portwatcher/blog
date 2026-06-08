@@ -1,8 +1,11 @@
 <template>
   <div>
-    <div v-for="year in Array.from(yearGroupMap.keys()).sort(() => 1)">
+    <div
+      v-for="[year, articles] in yearGroups"
+      :key="year"
+    >
       <h1>{{ year }}</h1>
-      <SummaryTitleList :articles="yearGroupMap.get(year)!">
+      <SummaryTitleList :articles="articles">
       </SummaryTitleList>
     </div>
   </div>
@@ -10,26 +13,34 @@
 
 <script setup lang="ts">
 const config = useRuntimeConfig()
-const { t } = useI18n()
+const { locale, t } = useI18n()
 
-const { data } = await useFetch<Article[]>('/api/articles')
+const { data } = await useFetch<Article[]>('/api/articles', {
+  query: computed(() => ({
+    lang: locale.value,
+  })),
+})
 
-const yearGroupMap: YearGroupMap = new Map()
+const yearGroups = computed(() => {
+  const yearGroupMap: YearGroupMap = new Map()
 
-data.value?.forEach((article) => {
-  const year = new Date(article.date).getFullYear()
-  if (isNaN(year)) {
-    return
-  }
-  if (!yearGroupMap.has(year)) {
-    yearGroupMap.set(year, [article])
-  } else {
-    yearGroupMap.get(year)?.push(article)
-  }
+  data.value?.forEach((article) => {
+    const year = new Date(article.date).getFullYear()
+    if (isNaN(year)) {
+      return
+    }
+    if (!yearGroupMap.has(year)) {
+      yearGroupMap.set(year, [article])
+    } else {
+      yearGroupMap.get(year)?.push(article)
+    }
+  })
+
+  return Array.from(yearGroupMap.entries())
 })
 
 useSeoMeta({
-  title: t('archive'),
+  title: () => t('archive'),
   ogUrl: new URL('/archive', config.public.host).toString(),
   twitterCard: 'summary',
 })

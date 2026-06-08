@@ -25,16 +25,18 @@
 
 <script setup lang="ts">
 const config = useRuntimeConfig()
+const { locale } = useI18n()
 
 const { data } = await useFetch<Article[]>('/api/articles', {
-  query: {
-    only: ['title', '_dir', 'description']
-  },
+  query: computed(() => ({
+    only: ['title', '_dir', 'description'],
+    lang: locale.value,
+  })),
 })
 
-const latestArticle = data.value?.[0]
+const latestArticle = computed(() => data.value?.[0])
 
-const categories = data.value?.reduce((acc: CategoryInfo[], article: Article) => {
+const categories = computed(() => data.value?.reduce((acc: CategoryInfo[], article: Article) => {
   const categoryTitle = article._dir || 'uncategorized'
   const category = acc.find((c) => c.title === categoryTitle)
   if (category) {
@@ -47,7 +49,7 @@ const categories = data.value?.reduce((acc: CategoryInfo[], article: Article) =>
   }
 
   return acc
-}, []) ?? []
+}, []) ?? [])
 
 useHead(() => ({
   title: config.public.title,
