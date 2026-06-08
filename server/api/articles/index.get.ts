@@ -64,7 +64,16 @@ const normalizeDescription = (value: unknown) =>
 const getTextFromContentNode = (node: any): string => {
   if (!node) return ''
   if (typeof node === 'string') return node
+  if (Array.isArray(node)) {
+    const isMinimarkTuple = typeof node[0] === 'string' && typeof node[1] === 'object' && !Array.isArray(node[1])
+    const children = isMinimarkTuple ? node.slice(2) : node
+
+    return children.map(getTextFromContentNode).filter(Boolean).join(' ')
+  }
   if (node.type === 'text') return String(node.value || '')
+  if (node.type === 'minimark' && Array.isArray(node.value)) return getTextFromContentNode(node.value)
+  if (typeof node.value === 'string') return node.value
+  if (Array.isArray(node.value)) return getTextFromContentNode(node.value)
   if (!Array.isArray(node.children)) return ''
 
   return node.children.map(getTextFromContentNode).filter(Boolean).join(' ')
