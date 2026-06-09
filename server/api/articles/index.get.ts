@@ -100,6 +100,87 @@ const getArticleTranslations = async (event: any, article: ArticleDocument) => {
   return translations.map(withCompatibilityFields)
 }
 
+const getListingTranslationSelectFields = (only: unknown) => {
+  const fields = only
+    ? parseOnlyFields(only)
+    : [
+        'title',
+        'description',
+        'body',
+        'category',
+        'date',
+        'status',
+        'path',
+        'lang',
+        'legacyPath',
+        'cover',
+        'video',
+        'originalTitle',
+        'sourcePath',
+        'sourceHash',
+      ]
+
+  fields.push('originalTitle', 'lang', 'status', 'path', 'category', 'date', 'legacyPath')
+
+  return Array.from(new Set(fields))
+}
+
+const getListingTranslationsByTitle = async (
+  event: any,
+  docs: ArticleDocument[],
+  queryLang: unknown,
+  config: ReturnType<typeof useRuntimeConfig>,
+  only: unknown,
+) => {
+  const requestedTranslationLangs = new Set(
+    docs
+      .map((doc) => getRequestedTranslationLang(queryLang, config, getArticleSourceLang(doc, config)))
+      .filter(Boolean),
+  )
+  if (requestedTranslationLangs.size === 0) return new Map<string, ArticleDocument[]>()
+
+  const titles = new Set(docs.map((doc) => String(doc.title || '')).filter(Boolean))
+  if (titles.size === 0) return new Map<string, ArticleDocument[]>()
+
+  const requestedLangs = Array.from(requestedTranslationLangs)
+  const translationsQuery = queryCollection(event, 'translations')
+    .select(...(getListingTranslationSelectFields(only) as any[]))
+
+  if (requestedLangs.length === 1) {
+    translationsQuery.where('lang', '=', requestedLangs[0])
+  } else {
+    translationsQuery.andWhere((group) => {
+      let langGroup = group.where('lang', '=', requestedLangs[0])
+      for (const lang of requestedLangs.slice(1)) {
+        langGroup = langGroup.orWhere((orGroup) => orGroup.where('lang', '=', lang))
+      }
+
+      return langGroup
+    })
+  }
+
+  const translations = ((await translationsQuery.all()) as ArticleDocument[])
+    .map(withCompatibilityFields)
+    .filter((translation) =>
+      titles.has(String(translation.originalTitle || '')) &&
+      requestedTranslationLangs.has(String(translation.lang || '').trim()),
+    )
+
+  return translations.reduce((acc, translation) => {
+    const originalTitle = String(translation.originalTitle || '')
+    if (!originalTitle) return acc
+
+    const existing = acc.get(originalTitle)
+    if (existing) {
+      existing.push(translation)
+    } else {
+      acc.set(originalTitle, [translation])
+    }
+
+    return acc
+  }, new Map<string, ArticleDocument[]>())
+}
+
 const getAvailableTranslationLangs = (translations: ArticleDocument[], sourceLang: string) =>
   Array.from(
     new Set(
@@ -190,14 +271,15 @@ const getArticleListingDocument = async (
   article: ArticleDocument,
   queryLang: unknown,
   config: ReturnType<typeof useRuntimeConfig>,
+  translations?: ArticleDocument[],
 ) => {
   const sourceLang = getArticleSourceLang(article, config)
   const requestedLang = getRequestedTranslationLang(queryLang, config, sourceLang)
 
   if (!requestedLang) return article
 
-  const translations = await getArticleTranslations(event, article)
-  return getArticleWithTranslation(article, requestedLang, translations, sourceLang)
+  const articleTranslations = translations ?? await getArticleTranslations(event, article)
+  return getArticleWithTranslation(article, requestedLang, articleTranslations, sourceLang)
 }
 
 export default defineEventHandler(async (event) => {
@@ -219,7 +301,17 @@ export default defineEventHandler(async (event) => {
     )
   }
   if (query.page) {
-    queryBuilder.limit(limit).skip((Number(query.page) - 1) * limit)
+    const requestedLimit = Math.trunc(Number(query.limit))
+    const pageLimit = Number.isFinite(requestedLimit) && requestedLimit > 0
+      ? Math.min(requestedLimit, 100)
+      : limit
+
+    queryBuilder.limit(pageLimit).skip((Number(query.page) - 1) * pageLimit)
+  } else if (query.limit) {
+    const requestedLimit = Math.trunc(Number(query.limit))
+    if (Number.isFinite(requestedLimit) && requestedLimit > 0) {
+      queryBuilder.limit(Math.min(requestedLimit, 100))
+    }
   }
   if (query.status) {
     queryBuilder.where('status', '=', String(query.status))
@@ -360,8 +452,17 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  const listingTranslationsByTitle = await getListingTranslationsByTitle(event, docs, query.lang, config, query.only)
   const localizedDocs = await Promise.all(
-    docs.map((doc) => getArticleListingDocument(event, doc, query.lang, config)),
+    docs.map((doc) =>
+      getArticleListingDocument(
+        event,
+        doc,
+        query.lang,
+        config,
+        listingTranslationsByTitle.get(String(doc.title || '')) ?? [],
+      ),
+    ),
   )
 
   // Listing queries: never include body; mask private descriptions

@@ -16,6 +16,7 @@ const { data: articles } = await useFetch<Article[]>('/api/articles', {
   query: computed(() => ({
     category: route.params.category,
     page,
+    only: ['title', 'date', '_dir'],
     lang: locale.value,
   })),
 })

@@ -27,14 +27,23 @@
 const config = useRuntimeConfig()
 const { locale } = useI18n()
 
-const { data } = await useFetch<Article[]>('/api/articles', {
-  query: computed(() => ({
-    only: ['title', '_dir', 'description'],
-    lang: locale.value,
-  })),
-})
+const [{ data }, { data: latestArticles }] = await Promise.all([
+  useFetch<Article[]>('/api/articles', {
+    query: computed(() => ({
+      only: ['title', '_dir'],
+      lang: locale.value,
+    })),
+  }),
+  useFetch<Article[]>('/api/articles', {
+    query: computed(() => ({
+      only: ['title', '_dir', 'description'],
+      limit: 1,
+      lang: locale.value,
+    })),
+  }),
+])
 
-const latestArticle = computed(() => data.value?.[0])
+const latestArticle = computed(() => latestArticles.value?.[0])
 
 const categories = computed(() => data.value?.reduce((acc: CategoryInfo[], article: Article) => {
   const categoryTitle = article._dir || 'uncategorized'

@@ -17,6 +17,7 @@ const { locale, t } = useI18n()
 
 const { data } = await useFetch<Article[]>('/api/articles', {
   query: computed(() => ({
+    only: ['title', 'date', '_dir'],
     lang: locale.value,
   })),
 })
