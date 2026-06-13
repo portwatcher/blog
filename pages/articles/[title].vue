@@ -183,6 +183,15 @@ const applyMarkdownImageLayout = async () => {
 
   await nextTick()
 
+  document.querySelectorAll<HTMLIFrameElement>('.markdown iframe').forEach((iframe) => {
+    const width = Number.parseFloat(iframe.getAttribute('width') || '')
+    const height = Number.parseFloat(iframe.getAttribute('height') || '')
+
+    if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+      iframe.style.setProperty('--markdown-embed-ratio', `${width} / ${height}`)
+    }
+  })
+
   document.querySelectorAll<HTMLImageElement>('.markdown img').forEach((image) => {
     const updateImageOrientation = () => {
       image.classList.toggle('markdown-image-tall', image.naturalHeight > image.naturalWidth)
@@ -386,6 +395,19 @@ const unlock = async function () {
   margin-right: auto;
   margin-top: 1rem;
   margin-bottom: 1rem;
+  max-width: 100%;
+}
+
+.markdown :where(iframe, object, embed) {
+  display: block;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin: 2rem auto;
+}
+
+.markdown iframe {
+  aspect-ratio: var(--markdown-embed-ratio, 16 / 9);
+  height: auto;
 }
 
 .markdown img {
