@@ -4,6 +4,25 @@
   </NuxtLayout>
 </template>
 
+<script setup lang="ts">
+const supportedLocales = ['en', 'zh', 'ja'] as const
+type SupportedLocale = typeof supportedLocales[number]
+const isSupportedLocale = (value: string): value is SupportedLocale =>
+  supportedLocales.includes(value as SupportedLocale)
+const { locale: currentLocale, setLocale } = useI18n()
+
+const detectedLocale = import.meta.client
+  ? navigator.language.slice(0, 2).toLowerCase()
+  : useRequestHeaders(['accept-language'])
+    ?.['accept-language']?.slice(0, 2)
+    .toLowerCase() || 'en'
+const locale = isSupportedLocale(detectedLocale) ? detectedLocale : 'en'
+
+if (currentLocale.value !== locale) {
+  await setLocale(locale)
+}
+</script>
+
 <style>
 :root {
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
