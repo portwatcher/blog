@@ -39,7 +39,33 @@ The app can run against local Markdown under `content/`, but production-style us
 
 ## Content Repo
 
-Content lives in a separate Git repository. This app repo owns Nuxt, Decap, media upload endpoints, Docker, and deployment. The content repo stores Markdown.
+Content lives in a separate Git repository. This app repo owns Nuxt, Decap, media upload endpoints, the Docker image recipe, and reusable deployment examples. Each site owner should keep real deployment credentials and infrastructure state in their own private repo.
+
+To bootstrap a content repository from the bundled template:
+
+```bash
+pnpm content:init --target ../my-blog-content
+```
+
+The initializer copies `templates/content-repo`, fills repository-specific placeholders, creates an initial git commit by default, and prints the `gh` commands for creating the private repo and wiring dispatch/build variables.
+
+For non-interactive setup:
+
+```bash
+pnpm content:init \
+  --yes \
+  --target ../my-blog-content \
+  --app-repo owner/blog \
+  --content-repo owner/blog-content
+```
+
+After creating the generated repository, configure the app repo to read it:
+
+```bash
+gh variable set CONTENT_REPO --repo owner/blog --body "owner/blog-content"
+gh variable set CONTENT_BRANCH --repo owner/blog --body "main"
+gh secret set BLOG_CONTENT_AUTH_TOKEN --repo owner/blog
+```
 
 Set these envs in local dev, Docker build, and deployment:
 
@@ -198,6 +224,16 @@ NUXT_CMS_LFS_AUTH_TOKEN=github_pat_or_deploy_token_with_write_access
 
 The deployment runtime must have `git` and `git-lfs` installed. After S3 multipart completion, the server clones the content repo, ensures `media/**` is tracked by Git LFS, downloads the S3 object, commits it under `NUXT_CMS_LFS_MEDIA_DIR`, and pushes it back.
 
+## Deploy Your Own Blog
+
+Production deployment has three separate pieces:
+
+1. This public app repo builds the Nuxt Docker image.
+2. Your private content repo stores Markdown and triggers image rebuilds.
+3. Your infrastructure repo or platform deploys the resulting image.
+
+The image is content-bound: Nuxt Content reads your private content repo during `nuxt build`, so each deployment should build its own image with a read token for its content repo.
+
 ## Docker Build
 
 The Docker build reads private content with a BuildKit secret named `blog_content_auth_token`. Do not pass the content token as a normal Docker build arg.
@@ -218,20 +254,14 @@ Run the built image with the runtime envs from `.env.example`:
 docker run --rm -p 3000:3000 --env-file .env ghcr.io/owner/blog:main
 ```
 
-## GitHub Actions Deploy
+## GitHub Actions Image Build
 
-The app repo includes `.github/workflows/deploy.yml`. It builds and pushes a Docker image, then optionally restarts a Kubernetes deployment if `KUBE_CONFIG` is set.
+The app repo includes `.github/workflows/build-image.yml`. It builds and pushes a Docker image, but does not deploy to any specific infrastructure.
 
 Required app repo secret:
 
 ```env
-BLOG_CONTENT_AUTH_TOKEN=github_pat_or_deploy_token_with_read_access
-```
-
-Optional app repo secret:
-
-```env
-KUBE_CONFIG=base64_or_plain_kubeconfig_used_by_kubectl
+BLOG_CONTENT_AUTH_TOKEN=github_pat_or_deploy_token_with_read_access_to_the_content_repo
 ```
 
 App repo variables:
@@ -243,20 +273,19 @@ App repo variables:
 | `CONTENT_REPO` | `${{ github.repository_owner }}/blog-content` |
 | `CONTENT_BRANCH` | `main` |
 | `BLOG_CONTENT_REPOSITORY` | empty |
-| `MEDIA_BASE_URL` | current juryquinn.com media bucket URL |
-| `KUBE_NAMESPACE` | `perohub` |
-| `KUBE_DEPLOYMENT` | `blog` |
-| `KUBE_CONTAINER` | `blog` |
+| `MEDIA_BASE_URL` | empty |
 
-The defaults keep the current `portwatcher/blog` production deployment working. Other developers should set at least `CONTENT_REPO`, `MEDIA_BASE_URL`, and their Kubernetes variables, or omit `KUBE_CONFIG` to build and push only.
+Set at least `CONTENT_REPO`, `MEDIA_BASE_URL`, and `BLOG_CONTENT_AUTH_TOKEN` for production builds.
 
 Runtime envs such as S3 credentials, CMS auth mode, OAuth secrets, upload token, and NeoDB key must be configured on the server or Kubernetes deployment that runs the image.
 
+For Kubernetes, keep manifests, image-pull secrets, runtime secrets, and rollout credentials in a private infra repo or private content/site repo. Do not put live cluster defaults in this public app repo.
+
 ## Content Repo Dispatch Workflow
 
-Content repo pushes should trigger this app repo's deploy through a `repository_dispatch` event named `blog-content-updated`.
+Content repo pushes can trigger this app repo's image build through a `repository_dispatch` event named `blog-content-updated`.
 
-Add this to the content repo as `.github/workflows/deploy-blog.yml`:
+New content repos can use `pnpm content:init`; it generates this workflow automatically. If you are wiring an existing content repo manually, add this as `.github/workflows/deploy-blog.yml`:
 
 ```yaml
 name: Deploy Blog
@@ -267,6 +296,7 @@ on:
       - main
     paths:
       - posts/**
+      - categories/**
       - media/**
       - translations/**
       - .github/workflows/deploy-blog.yml
@@ -298,7 +328,8 @@ jobs:
           gh api "repos/${BLOG_APP_REPOSITORY}/dispatches" \
             --method POST \
             --field "event_type=${BLOG_DISPATCH_EVENT}" \
-            --field "client_payload[content_sha]=${COMMIT_SHA}"
+            --field "client_payload[content_sha]=${COMMIT_SHA}" \
+            --field "client_payload[image_tag]=${COMMIT_SHA}"
 ```
 
 Set this content repo secret:
@@ -308,3 +339,10 @@ BLOG_DEPLOY_DISPATCH_TOKEN=github_token_with_contents_write_on_the_app_repo
 ```
 
 For fine-grained GitHub tokens, grant access to the app repo and `Contents: Read and write`. For classic PATs, use `repo` scope when either repo is private.
+
+Set these optional content repo variables when the generated defaults do not match your repositories:
+
+```bash
+gh variable set BLOG_APP_REPOSITORY --repo owner/blog-content --body "owner/blog"
+gh variable set BLOG_DISPATCH_EVENT --repo owner/blog-content --body "blog-content-updated"
+```

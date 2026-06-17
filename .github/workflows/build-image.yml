@@ -1,36 +1,39 @@
-name: Deploy
+name: Build Image
+run-name: Build ${{ github.event.client_payload.image_tag || github.event.client_payload.content_sha || github.event.inputs.image_tag || github.ref_name }}
 
 on:
   push:
     branches:
+      - main
       - develop
   repository_dispatch:
     types:
       - blog-content-updated
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Optional image tag override
+        required: false
+        type: string
 
 permissions:
   contents: read
   packages: write
 
 concurrency:
-  group: blog-deploy
+  group: blog-image-${{ github.event.client_payload.content_sha || github.event.inputs.image_tag || github.ref_name }}
   cancel-in-progress: true
 
 env:
   IMAGE: ${{ vars.IMAGE || format('ghcr.io/{0}', github.repository) }}
-  IMAGE_TAG: ${{ vars.IMAGE_TAG || github.ref_name }}
+  IMAGE_TAG: ${{ github.event.client_payload.image_tag || github.event.client_payload.content_sha || github.event.inputs.image_tag || vars.IMAGE_TAG || github.ref_name }}
   CONTENT_REPO: ${{ vars.CONTENT_REPO || format('{0}/blog-content', github.repository_owner) }}
   CONTENT_BRANCH: ${{ vars.CONTENT_BRANCH || 'main' }}
-  MEDIA_BASE_URL: ${{ vars.MEDIA_BASE_URL || 'https://jury-files.sgp1.digitaloceanspaces.com' }}
   BLOG_CONTENT_REPOSITORY: ${{ vars.BLOG_CONTENT_REPOSITORY || '' }}
-  KUBE_CONFIG_PRESENT: ${{ secrets.KUBE_CONFIG != '' }}
-  KUBE_NAMESPACE: ${{ vars.KUBE_NAMESPACE || 'perohub' }}
-  KUBE_DEPLOYMENT: ${{ vars.KUBE_DEPLOYMENT || 'blog' }}
-  KUBE_CONTAINER: ${{ vars.KUBE_CONTAINER || 'blog' }}
+  MEDIA_BASE_URL: ${{ vars.MEDIA_BASE_URL || '' }}
 
 jobs:
-  deploy:
+  build-image:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -63,23 +66,3 @@ jobs:
             NUXT_PUBLIC_MEDIA_BASE_URL=${{ env.MEDIA_BASE_URL }}
           secrets: |
             blog_content_auth_token=${{ secrets.BLOG_CONTENT_AUTH_TOKEN }}
-
-      - name: Set up kubectl
-        if: env.KUBE_CONFIG_PRESENT == 'true'
-        uses: azure/setup-kubectl@v4
-
-      - name: Configure kubeconfig
-        if: env.KUBE_CONFIG_PRESENT == 'true'
-        env:
-          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
-        run: |
-          mkdir -p ~/.kube
-          printf '%s' "$KUBE_CONFIG" > ~/.kube/config
-          chmod 600 ~/.kube/config
-
-      - name: Restart production deployment
-        if: env.KUBE_CONFIG_PRESENT == 'true'
-        run: |
-          kubectl -n "${KUBE_NAMESPACE}" set image "deployment/${KUBE_DEPLOYMENT}" "${KUBE_CONTAINER}=${IMAGE}:${IMAGE_TAG}"
-          kubectl -n "${KUBE_NAMESPACE}" rollout restart "deployment/${KUBE_DEPLOYMENT}"
-          kubectl -n "${KUBE_NAMESPACE}" rollout status "deployment/${KUBE_DEPLOYMENT}" --timeout=300s

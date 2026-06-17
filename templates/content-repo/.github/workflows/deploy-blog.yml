@@ -1,0 +1,47 @@
+name: Deploy Blog
+
+on:
+  push:
+    branches:
+      - {{BLOG_CONTENT_BRANCH}}
+    paths:
+      - posts/**
+      - categories/**
+      - translations/**
+      - media/**
+      - .github/workflows/deploy-blog.yml
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-blog
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  BLOG_APP_REPOSITORY: ${{ vars.BLOG_APP_REPOSITORY || '{{BLOG_APP_REPOSITORY}}' }}
+  BLOG_DISPATCH_EVENT: ${{ vars.BLOG_DISPATCH_EVENT || '{{BLOG_DISPATCH_EVENT}}' }}
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout content
+        uses: actions/checkout@v4
+
+      - name: Dispatch blog rebuild
+        env:
+          GH_TOKEN: ${{ secrets.BLOG_DEPLOY_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::Set BLOG_DEPLOY_DISPATCH_TOKEN to a token that can dispatch ${BLOG_APP_REPOSITORY}."
+            exit 1
+          fi
+
+          COMMIT_SHA="$(git rev-parse HEAD)"
+          gh api "repos/${BLOG_APP_REPOSITORY}/dispatches" \
+            --method POST \
+            --field "event_type=${BLOG_DISPATCH_EVENT}" \
+            --field "client_payload[content_sha]=${COMMIT_SHA}" \
+            --field "client_payload[image_tag]=${COMMIT_SHA}"

@@ -6,6 +6,7 @@
   "scripts": {
     "build": "nuxt build",
     "cms:s3-cors": "node scripts/configure-s3-cors.mjs",
+    "content:init": "node scripts/init-content-repo.mjs",
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
