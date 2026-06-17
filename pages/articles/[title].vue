@@ -59,7 +59,6 @@
 
 <script setup lang="ts">
 const route = useRoute()
-const router = useRouter()
 const config = useRuntimeConfig()
 const password = ref<string | null>(null)
 const article = ref<Article | null>(null)
@@ -79,7 +78,6 @@ const configuredTranslationLanguages = computed(() =>
 const currentLang = computed(() => String(route.query.lang || ''))
 const sourceLang = computed(() => String(article.value?.sourceLang || config.public.originalLanguage || 'zh'))
 const availableTranslations = computed(() => article.value?.availableTranslations ?? [])
-const autoLanguageSelectionAttempted = ref(Boolean(currentLang.value))
 const commentDiscussionTerm = computed(() =>
   String(article.value?.originalTitle || route.params.title || article.value?.title || '').trim(),
 )
@@ -148,36 +146,6 @@ const languageRoute = (lang: string) => {
   }
 }
 
-const getBrowserPreferredLanguage = () => {
-  if (!import.meta.client) return ''
-
-  const browserLanguages = navigator.languages?.length
-    ? navigator.languages
-    : [navigator.language].filter(Boolean)
-
-  for (const browserLanguage of browserLanguages) {
-    const match = availableLanguageCodes.value.find((lang) => languagesAlign(lang, browserLanguage))
-    if (match) return match
-  }
-
-  return ''
-}
-
-const applyBrowserLanguagePreference = async () => {
-  if (autoLanguageSelectionAttempted.value || currentLang.value || languageTabs.value.length <= 1) {
-    return
-  }
-
-  autoLanguageSelectionAttempted.value = true
-  const preferredLang = getBrowserPreferredLanguage()
-
-  if (!preferredLang || languagesAlign(preferredLang, sourceLang.value)) {
-    return
-  }
-
-  await router.replace(languageRoute(preferredLang))
-}
-
 const applyMarkdownImageLayout = async () => {
   if (!import.meta.client) return
 
@@ -227,20 +195,14 @@ const languageTabs = computed(() =>
 )
 
 onMounted(() => {
-  void applyBrowserLanguagePreference()
   void applyMarkdownImageLayout()
 })
 
 watch(
   () => [String(route.params.title || ''), String(route.query.lang || '')],
-  ([title], [previousTitle]) => {
-    if (title !== previousTitle) {
-      autoLanguageSelectionAttempted.value = Boolean(currentLang.value)
-    }
-
+  () => {
     void (async () => {
       await loadArticle()
-      await applyBrowserLanguagePreference()
       await applyMarkdownImageLayout()
     })()
   },
