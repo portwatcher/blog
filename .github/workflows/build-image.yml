@@ -27,10 +27,6 @@ concurrency:
 env:
   IMAGE: ${{ vars.IMAGE || format('ghcr.io/{0}', github.repository) }}
   IMAGE_TAG: ${{ github.event.client_payload.image_tag || github.event.client_payload.content_sha || github.event.inputs.image_tag || vars.IMAGE_TAG || github.ref_name }}
-  CONTENT_REPO: ${{ vars.CONTENT_REPO || format('{0}/blog-content', github.repository_owner) }}
-  CONTENT_BRANCH: ${{ vars.CONTENT_BRANCH || 'main' }}
-  BLOG_CONTENT_REPOSITORY: ${{ vars.BLOG_CONTENT_REPOSITORY || '' }}
-  MEDIA_BASE_URL: ${{ vars.MEDIA_BASE_URL || '' }}
 
 jobs:
   build-image:
@@ -58,11 +54,3 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:${{ env.IMAGE_TAG }}
             ${{ env.IMAGE }}:${{ github.sha }}
-          build-args: |
-            BLOG_CONTENT_BRANCH=${{ env.CONTENT_BRANCH }}
-            BLOG_CONTENT_REPOSITORY=${{ env.BLOG_CONTENT_REPOSITORY }}
-            NUXT_PUBLIC_CMS_CONTENT_REPO=${{ env.CONTENT_REPO }}
-            NUXT_PUBLIC_CMS_CONTENT_BRANCH=${{ env.CONTENT_BRANCH }}
-            NUXT_PUBLIC_MEDIA_BASE_URL=${{ env.MEDIA_BASE_URL }}
-          secrets: |
-            blog_content_auth_token=${{ secrets.BLOG_CONTENT_AUTH_TOKEN }}

@@ -30,26 +30,16 @@ status: public
 
 Use `status: private` to hide an article behind the blog's article password.
 
-## Image Build Dispatch
+## Runtime Configuration
 
-The bundled workflow dispatches `{{BLOG_APP_REPOSITORY}}` to rebuild the blog image when content changes. Configure these in this content repository:
+Configure the blog deployment that runs `{{BLOG_APP_REPOSITORY}}` with these runtime envs:
 
-```bash
-gh variable set BLOG_APP_REPOSITORY --repo {{BLOG_CONTENT_REPOSITORY}} --body "{{BLOG_APP_REPOSITORY}}"
-gh variable set BLOG_DISPATCH_EVENT --repo {{BLOG_CONTENT_REPOSITORY}} --body "{{BLOG_DISPATCH_EVENT}}"
-gh secret set BLOG_DEPLOY_DISPATCH_TOKEN --repo {{BLOG_CONTENT_REPOSITORY}}
+```env
+NUXT_PUBLIC_CMS_CONTENT_REPO={{BLOG_CONTENT_REPOSITORY}}
+NUXT_PUBLIC_CMS_CONTENT_BRANCH={{BLOG_CONTENT_BRANCH}}
+BLOG_CONTENT_AUTH_TOKEN=github_token_with_read_access_to_this_repo
 ```
 
-`BLOG_DEPLOY_DISPATCH_TOKEN` must be able to call `repository_dispatch` on the app repository.
-
-Then configure the app repository build to read this repository:
-
-```bash
-gh variable set CONTENT_REPO --repo {{BLOG_APP_REPOSITORY}} --body "{{BLOG_CONTENT_REPOSITORY}}"
-gh variable set CONTENT_BRANCH --repo {{BLOG_APP_REPOSITORY}} --body "{{BLOG_CONTENT_BRANCH}}"
-gh secret set BLOG_CONTENT_AUTH_TOKEN --repo {{BLOG_APP_REPOSITORY}}
-```
-
-`BLOG_CONTENT_AUTH_TOKEN` only needs read access to this content repository.
+The public app image does not rebuild when content changes. A running app refreshes this repository from Git after `BLOG_CONTENT_CACHE_TTL_MS`.
 
 Keep real infrastructure credentials in a private deployment repo or in this private content repo. The public app repo should build images only.

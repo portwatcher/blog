@@ -1,5 +1,5 @@
 import RSS from 'rss'
-import { queryCollection } from '@nuxt/content/server'
+import { getRuntimeContent } from '../utils/runtime-content'
 
 const getArticleCategory = (article: { category?: string, path: string }) => {
   return article.category || article.path.split('/').filter(Boolean)[0] || ''
@@ -8,10 +8,8 @@ const getArticleCategory = (article: { category?: string, path: string }) => {
 export default defineEventHandler(async (event) => {
   try {
     const config = useRuntimeConfig(event)
-    const articles = await queryCollection(event, 'articles')
-      .where('status', '=', 'public')
-      .order('date', 'DESC')
-      .all()
+    const { articles } = await getRuntimeContent(event)
+    const publicArticles = articles.filter((article) => article.status === 'public')
 
     const feed = new RSS({
       title: 'Rafael Magalhaes',
@@ -19,7 +17,7 @@ export default defineEventHandler(async (event) => {
       feed_url: `${config.public.host}/feed`,
     })
 
-    for (const article of articles.values()) {
+    for (const article of publicArticles.values()) {
       feed.item({
         title: String(article.title),
         url: `${config.public.host}/articles/${encodeURIComponent(

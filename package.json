@@ -19,6 +19,7 @@
     "@nuxt/content": "^3.14.0",
     "@nuxt/image": "^2.0.0",
     "@nuxtjs/i18n": "^10.4.0",
+    "@nuxtjs/mdc": "0.22.0",
     "@primevue/themes": "^4.5.4",
     "better-sqlite3": "12.10.0",
     "lucide-vue-next": "^0.453.0",

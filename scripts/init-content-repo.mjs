@@ -12,7 +12,6 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(scriptDir, '..')
 const templateDir = path.join(projectRoot, 'templates', 'content-repo')
 const defaultTargetDir = path.resolve(projectRoot, '..', 'blog-content')
-const dispatchEvent = 'blog-content-updated'
 
 const usage = `Usage: pnpm content:init [options]
 
@@ -183,20 +182,14 @@ Next steps:
   cd ${target}
   gh repo create ${contentRepo} --private --source . --remote origin --push
 
-Configure the content repo:
-  gh variable set BLOG_APP_REPOSITORY --repo ${contentRepo} --body "${appRepo}"
-  gh variable set BLOG_DISPATCH_EVENT --repo ${contentRepo} --body "${dispatchEvent}"
-  gh secret set BLOG_DEPLOY_DISPATCH_TOKEN --repo ${contentRepo}
-
-Configure the app repo build:
-  gh variable set CONTENT_REPO --repo ${appRepo} --body "${contentRepo}"
-  gh variable set CONTENT_BRANCH --repo ${appRepo} --body "${branch}"
-  gh secret set BLOG_CONTENT_AUTH_TOKEN --repo ${appRepo}
-
-Local app development:
+Configure the app runtime, not the public app image build:
   NUXT_PUBLIC_CMS_CONTENT_REPO=${contentRepo}
   NUXT_PUBLIC_CMS_CONTENT_BRANCH=${branch}
   BLOG_CONTENT_AUTH_TOKEN=<token with read access to ${contentRepo}>
+
+Local app development:
+  cd ${projectRoot}
+  NUXT_PUBLIC_CMS_CONTENT_REPO=${contentRepo} NUXT_PUBLIC_CMS_CONTENT_BRANCH=${branch} BLOG_CONTENT_AUTH_TOKEN=<token> pnpm dev
 `)
 }
 
@@ -228,7 +221,6 @@ try {
     BLOG_APP_REPOSITORY: appRepo,
     BLOG_CONTENT_REPOSITORY: contentRepo,
     BLOG_CONTENT_BRANCH: branch,
-    BLOG_DISPATCH_EVENT: dispatchEvent,
     POST_TITLE: title,
     POST_DATE: `${today} 09:00`,
   })

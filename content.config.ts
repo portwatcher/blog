@@ -14,44 +14,14 @@ const mediaAssetSchema = z.object({
   backupError: z.string().optional(),
 })
 
-const cmsContentRepo = process.env.NUXT_PUBLIC_CMS_CONTENT_REPO
-const contentRepository = process.env.BLOG_CONTENT_REPOSITORY ||
-  (cmsContentRepo
-    ? cmsContentRepo.includes('://')
-      ? cmsContentRepo
-      : `https://github.com/${cmsContentRepo}.git`
-    : undefined)
-const contentBranch = process.env.BLOG_CONTENT_BRANCH || process.env.NUXT_PUBLIC_CMS_CONTENT_BRANCH || 'main'
-const contentToken = process.env.BLOG_CONTENT_AUTH_TOKEN
-const contentUsername = process.env.BLOG_CONTENT_AUTH_USERNAME || 'x-access-token'
-
-const remoteRepository = contentRepository
-  ? {
-      url: contentRepository,
-      branch: contentBranch,
-      auth: contentToken
-        ? {
-            username: contentUsername,
-            token: contentToken,
-          }
-        : undefined,
-    }
-  : undefined
-
-const makeSource = (include: string, localInclude = include) =>
-  remoteRepository
-    ? {
-        include,
-        prefix: '/',
-        repository: remoteRepository,
-      }
-    : {
-        include: localInclude,
-        prefix: '/',
-      }
-
-const articleSource = makeSource(process.env.BLOG_CONTENT_INCLUDE || 'posts/**/*.md', '**/*.md')
-const translationSource = makeSource(process.env.BLOG_TRANSLATION_INCLUDE || 'translations/**/*.md')
+const articleSource = {
+  include: process.env.BLOG_CONTENT_LOCAL_INCLUDE || '**/*.md',
+  prefix: '/',
+}
+const translationSource = {
+  include: process.env.BLOG_TRANSLATION_LOCAL_INCLUDE || 'translations/**/*.md',
+  prefix: '/',
+}
 
 export default defineContentConfig({
   collections: {

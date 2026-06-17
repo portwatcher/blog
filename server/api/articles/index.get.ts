@@ -1,4 +1,3 @@
-import { queryCollection } from '@nuxt/content/server'
 import {
   getClientIP,
   isBlocked,
@@ -6,6 +5,7 @@ import {
   noteFailedAttempt,
   noteSuccessfulUnlock,
 } from '../../utils/ratelimit'
+import { getRuntimeContent } from '../../utils/runtime-content'
 
 const limit = 10
 
@@ -58,6 +58,16 @@ const withCompatibilityFields = (article: ArticleDocument) => ({
   _dir: article._dir || getArticleCategory(article),
 })
 
+const selectDocumentFields = (doc: ArticleDocument, fields: string[]) => {
+  const selected: ArticleDocument = {}
+
+  for (const field of fields) {
+    if (field in doc) selected[field] = doc[field]
+  }
+
+  return withCompatibilityFields(selected)
+}
+
 const normalizeDescription = (value: unknown) =>
   String(value || '').replace(/\s+/g, ' ').trim()
 
@@ -93,11 +103,11 @@ const getArticleTranslations = async (event: any, article: ArticleDocument) => {
   const originalTitle = String(article.title || '')
   if (!originalTitle) return []
 
-  const translations = await queryCollection(event, 'translations')
-    .where('originalTitle', '=', originalTitle)
-    .all() as ArticleDocument[]
+  const { translations } = await getRuntimeContent(event)
 
-  return translations.map(withCompatibilityFields)
+  return translations
+    .filter((translation) => String(translation.originalTitle || '') === originalTitle)
+    .map(withCompatibilityFields)
 }
 
 const getListingTranslationSelectFields = (only: unknown) => {
@@ -142,29 +152,15 @@ const getListingTranslationsByTitle = async (
   const titles = new Set(docs.map((doc) => String(doc.title || '')).filter(Boolean))
   if (titles.size === 0) return new Map<string, ArticleDocument[]>()
 
-  const requestedLangs = Array.from(requestedTranslationLangs)
-  const translationsQuery = queryCollection(event, 'translations')
-    .select(...(getListingTranslationSelectFields(only) as any[]))
-
-  if (requestedLangs.length === 1) {
-    translationsQuery.where('lang', '=', requestedLangs[0])
-  } else {
-    translationsQuery.andWhere((group) => {
-      let langGroup = group.where('lang', '=', requestedLangs[0])
-      for (const lang of requestedLangs.slice(1)) {
-        langGroup = langGroup.orWhere((orGroup) => orGroup.where('lang', '=', lang))
-      }
-
-      return langGroup
-    })
-  }
-
-  const translations = ((await translationsQuery.all()) as ArticleDocument[])
+  const fields = getListingTranslationSelectFields(only)
+  const { translations: allTranslations } = await getRuntimeContent(event)
+  const translations = allTranslations
     .map(withCompatibilityFields)
     .filter((translation) =>
       titles.has(String(translation.originalTitle || '')) &&
       requestedTranslationLangs.has(String(translation.lang || '').trim()),
     )
+    .map((translation) => selectDocumentFields(translation, fields))
 
   return translations.reduce((acc, translation) => {
     const originalTitle = String(translation.originalTitle || '')
@@ -284,44 +280,26 @@ const getArticleListingDocument = async (
 
 export default defineEventHandler(async (event) => {
   const query = getQuery(event)
-  const queryBuilder = queryCollection(event, 'articles').order('date', 'DESC')
-  const config = useRuntimeConfig()
+  const config = useRuntimeConfig(event)
   const ip = getClientIP(event)
   const requestedPath = query.path ? String(query.path) : ''
+  const { articles } = await getRuntimeContent(event)
+  let docs = articles.map(withCompatibilityFields) as ArticleDocument[]
 
   if (query.title) {
-    queryBuilder.where('title', '=', String(query.title))
+    docs = docs.filter((doc) => String(doc.title || '') === String(query.title))
   }
   if (query.category && !requestedPath) {
     const category = String(query.category)
-    queryBuilder.andWhere((group) =>
-      group
-        .where('category', '=', category)
-        .orWhere((pathGroup) => pathGroup.where('path', 'LIKE', `/${category}/%`))
+    const categoryPath = `/${category.toLowerCase()}/`
+    docs = docs.filter((doc) =>
+      String(doc.category || '') === category ||
+      String(doc.path || doc._path || '').toLowerCase().startsWith(categoryPath)
     )
   }
-  if (query.page) {
-    const requestedLimit = Math.trunc(Number(query.limit))
-    const pageLimit = Number.isFinite(requestedLimit) && requestedLimit > 0
-      ? Math.min(requestedLimit, 100)
-      : limit
-
-    queryBuilder.limit(pageLimit).skip((Number(query.page) - 1) * pageLimit)
-  } else if (query.limit) {
-    const requestedLimit = Math.trunc(Number(query.limit))
-    if (Number.isFinite(requestedLimit) && requestedLimit > 0) {
-      queryBuilder.limit(Math.min(requestedLimit, 100))
-    }
-  }
   if (query.status) {
-    queryBuilder.where('status', '=', String(query.status))
+    docs = docs.filter((doc) => String(doc.status || '') === String(query.status))
   }
-  if (query.only) {
-    // Avoid sending body in listings by default; consumers can explicitly request it.
-    queryBuilder.select(...(parseOnlyFields(query.only) as any[]))
-  }
-
-  let docs = ((await queryBuilder.all()) as ArticleDocument[]).map(withCompatibilityFields) as ArticleDocument[]
   if (requestedPath) {
     const normalizedPath = requestedPath.toLowerCase()
     docs = docs.filter((doc) =>
@@ -330,6 +308,26 @@ export default defineEventHandler(async (event) => {
         return candidate === requestedPath || candidate.toLowerCase() === normalizedPath
       })
     )
+  }
+  if (query.page) {
+    const requestedLimit = Math.trunc(Number(query.limit))
+    const pageLimit = Number.isFinite(requestedLimit) && requestedLimit > 0
+      ? Math.min(requestedLimit, 100)
+      : limit
+
+    const requestedPage = Math.trunc(Number(query.page))
+    const page = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1
+    docs = docs.slice((page - 1) * pageLimit, page * pageLimit)
+  } else if (query.limit) {
+    const requestedLimit = Math.trunc(Number(query.limit))
+    if (Number.isFinite(requestedLimit) && requestedLimit > 0) {
+      docs = docs.slice(0, Math.min(requestedLimit, 100))
+    }
+  }
+  if (query.only) {
+    // Avoid sending body in listings by default; consumers can explicitly request it.
+    const fields = parseOnlyFields(query.only)
+    docs = docs.map((doc) => selectDocumentFields(doc, fields))
   }
 
   if (query.title) {
