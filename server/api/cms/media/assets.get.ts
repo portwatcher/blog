@@ -306,6 +306,10 @@ const addStaticPublicAssets = async (assets: Map<string, CmsMediaAsset>) => {
 }
 
 export default defineEventHandler(async (event) => {
+  event.node.res.setHeader('cache-control', 'no-store')
+  event.node.res.setHeader('pragma', 'no-cache')
+  event.node.res.setHeader('expires', '0')
+
   await assertCmsMediaLibraryAuthorized(event)
 
   const query = getQuery(event)
