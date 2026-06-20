@@ -106,6 +106,7 @@ const getArticleTranslations = async (event: any, article: ArticleDocument) => {
   const { translations } = await getRuntimeContent(event)
 
   return translations
+    .filter((translation) => translation.status !== 'draft')
     .filter((translation) => String(translation.originalTitle || '') === originalTitle)
     .map(withCompatibilityFields)
 }
@@ -157,6 +158,7 @@ const getListingTranslationsByTitle = async (
   const translations = allTranslations
     .map(withCompatibilityFields)
     .filter((translation) =>
+      translation.status !== 'draft' &&
       titles.has(String(translation.originalTitle || '')) &&
       requestedTranslationLangs.has(String(translation.lang || '').trim()),
     )
@@ -284,7 +286,9 @@ export default defineEventHandler(async (event) => {
   const ip = getClientIP(event)
   const requestedPath = query.path ? String(query.path) : ''
   const { articles } = await getRuntimeContent(event)
-  let docs = articles.map(withCompatibilityFields) as ArticleDocument[]
+  let docs = articles
+    .filter((article) => article.status !== 'draft')
+    .map(withCompatibilityFields) as ArticleDocument[]
 
   if (query.title) {
     docs = docs.filter((doc) => String(doc.title || '') === String(query.title))

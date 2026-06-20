@@ -302,8 +302,12 @@ const getDefaultCategory = (relativePath: string) => {
   return articlePath.split('/').filter(Boolean)[0] || ''
 }
 
-const normalizeStatus = (status: unknown) =>
-  String(status || 'public').trim().toLowerCase() === 'private' ? 'private' : 'public'
+const normalizeStatus = (status: unknown) => {
+  const normalized = String(status || 'public').trim().toLowerCase()
+  if (normalized === 'draft') return 'draft'
+  if (normalized === 'private') return 'private'
+  return 'public'
+}
 
 const parseDateValue = (value: unknown) => {
   const normalized = String(value || '')

@@ -68,7 +68,7 @@ interface Article {
   description?: string
   category?: string
   date: string
-  status?: 'public' | 'private'
+  status?: 'draft' | 'public' | 'private'
   lang?: string
   sourcePath?: string
   sourceHash?: string

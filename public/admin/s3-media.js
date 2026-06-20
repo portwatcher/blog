@@ -33,6 +33,19 @@
     return baseUrl.replace(/\/+$/, '') + '/' + String(value.key).split('/').map(encodeURIComponent).join('/');
   }
 
+  function getMediaKind(fileOrAsset, fallback) {
+    var value = fileOrAsset || {};
+    var contentType = value.type || value.contentType || '';
+    var name = value.name || value.filename || value.key || value.path || value.url || '';
+
+    if (contentType.indexOf('image/') === 0) return 'image';
+    if (contentType.indexOf('video/') === 0) return 'video';
+    if (/\.(avif|bmp|gif|jpe?g|png|svg|tiff?|webp)$/i.test(name)) return 'image';
+    if (/\.(m4v|mov|mp4|mpeg|mpg|ogg|ogv|webm)$/i.test(name)) return 'video';
+
+    return fallback || 'file';
+  }
+
   function escapeHtml(value) {
     return String(value || '')
       .replace(/&/g, '&amp;')
@@ -43,6 +56,28 @@
 
   function escapeAttr(value) {
     return escapeHtml(value).replace(/\n/g, ' ');
+  }
+
+  function fileListToArray(fileList) {
+    return Array.prototype.slice.call(fileList || []);
+  }
+
+  function getTransferMediaFiles(dataTransfer) {
+    if (!dataTransfer) return [];
+
+    var files = fileListToArray(dataTransfer.files).filter(function (file) {
+      return getMediaKind(file) !== 'file';
+    });
+    if (files.length) return files;
+
+    return fileListToArray(dataTransfer.items)
+      .filter(function (item) {
+        return item.kind === 'file' && getMediaKind({ type: item.type }) !== 'file';
+      })
+      .map(function (item) {
+        return item.getAsFile();
+      })
+      .filter(Boolean);
   }
 
   async function getUploadConfig() {
@@ -234,6 +269,202 @@
       }).catch(function () {});
       throw error;
     }
+  }
+
+  function makeMdcBlock(asset, kind) {
+    var attrs = 'objectKey="' + escapeAttr(asset.key) + '"';
+    if (asset.alt) attrs += kind === 'video'
+      ? ' description="' + escapeAttr(asset.alt) + '"'
+      : ' alt="' + escapeAttr(asset.alt) + '"';
+    if (kind === 'image') {
+      if (asset.width) attrs += ' width="' + escapeAttr(asset.width) + '"';
+      if (asset.height) attrs += ' height="' + escapeAttr(asset.height) + '"';
+    }
+    return '::s3-' + kind + '{' + attrs + '}\n::';
+  }
+
+  function withBlockSpacing(block) {
+    return '\n\n' + block + '\n\n';
+  }
+
+  function setRawEditorStatus(root, message, isError) {
+    if (!root) return;
+
+    var status = root.querySelector('.blog-cms-upload-status');
+    if (!status) {
+      status = document.createElement('div');
+      status.className = 'blog-cms-upload-status';
+      root.appendChild(status);
+    }
+
+    status.textContent = message || '';
+    status.dataset.visible = message ? 'true' : 'false';
+    status.dataset.error = isError ? 'true' : 'false';
+
+    if (message && !isError) {
+      window.clearTimeout(status._hideTimer);
+      status._hideTimer = window.setTimeout(function () {
+        status.dataset.visible = 'false';
+      }, 2400);
+    }
+  }
+
+  function getRawEditorRoot(target) {
+    if (!target || !target.closest) return null;
+    var root = target.closest('.cms-editor-raw');
+    if (!root || root.closest('.blog-cms-media-library')) return null;
+    return root;
+  }
+
+  function getEditableTarget(root) {
+    if (!root) return null;
+    return root.querySelector('[contenteditable="true"], textarea');
+  }
+
+  function captureInsertionPoint(target) {
+    if (!target) return null;
+
+    if (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT') {
+      return {
+        type: 'field',
+        start: target.selectionStart || 0,
+        end: target.selectionEnd || target.selectionStart || 0,
+      };
+    }
+
+    var selection = window.getSelection && window.getSelection();
+    if (!selection || !selection.rangeCount) return null;
+
+    var range = selection.getRangeAt(0);
+    if (!target.contains(range.commonAncestorContainer)) return null;
+    return { type: 'range', range: range.cloneRange() };
+  }
+
+  function restoreInsertionPoint(target, insertionPoint) {
+    if (!target || !insertionPoint) return;
+
+    if (insertionPoint.type === 'field') {
+      target.selectionStart = insertionPoint.start;
+      target.selectionEnd = insertionPoint.end;
+      return;
+    }
+
+    if (insertionPoint.type === 'range') {
+      var selection = window.getSelection && window.getSelection();
+      if (!selection) return;
+      selection.removeAllRanges();
+      selection.addRange(insertionPoint.range);
+    }
+  }
+
+  function insertTextAtTarget(target, text, insertionPoint) {
+    if (!target) return false;
+
+    target.focus();
+    restoreInsertionPoint(target, insertionPoint);
+
+    if (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT') {
+      var start = target.selectionStart || 0;
+      var end = target.selectionEnd || start;
+      var value = target.value || '';
+      target.value = value.slice(0, start) + text + value.slice(end);
+      target.selectionStart = target.selectionEnd = start + text.length;
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+      target.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }
+
+    if (document.execCommand) {
+      return document.execCommand('insertText', false, text);
+    }
+
+    return false;
+  }
+
+  async function uploadFileToAsset(file, onProgress) {
+    var kind = getMediaKind(file);
+    var result = await uploadMultipart(file, onProgress || function () {});
+    var dimensions = kind === 'image'
+      ? await readImageDimensions(file)
+      : await readVideoDimensions(file);
+
+    return Object.assign({}, dimensions, {
+      provider: 's3',
+      key: result.key,
+      url: result.publicUrl || getAssetUrl({ key: result.key }),
+      filename: file.name,
+      name: file.name,
+      contentType: file.type || '',
+      size: file.size,
+      kind: kind,
+      source: 'Uploaded this session',
+    }, backupFields(result.backup));
+  }
+
+  async function uploadFilesForRawEditor(root, files) {
+    var editable = getEditableTarget(root);
+    if (!editable || !files.length) return;
+    var insertionPoint = captureInsertionPoint(editable);
+
+    for (var index = 0; index < files.length; index += 1) {
+      var file = files[index];
+      var kind = getMediaKind(file);
+
+      try {
+        setRawEditorStatus(root, 'Uploading ' + file.name + '...', false);
+        var asset = await uploadFileToAsset(file, function (progress) {
+          setRawEditorStatus(root, 'Uploading ' + file.name + ' (' + progress + '%)...', false);
+        });
+        insertTextAtTarget(editable, withBlockSpacing(makeMdcBlock(asset, kind)), insertionPoint);
+        insertionPoint = captureInsertionPoint(editable);
+        setRawEditorStatus(root, 'Inserted ' + file.name + '.', false);
+      } catch (error) {
+        setRawEditorStatus(
+          root,
+          error && error.message ? error.message : String(error),
+          true
+        );
+      }
+    }
+  }
+
+  function registerRawMarkdownUploadHandlers() {
+    document.addEventListener('paste', function (event) {
+      var root = getRawEditorRoot(event.target);
+      if (!root) return;
+
+      var files = getTransferMediaFiles(event.clipboardData);
+      if (!files.length) return;
+
+      event.preventDefault();
+      uploadFilesForRawEditor(root, files);
+    }, true);
+
+    document.addEventListener('dragover', function (event) {
+      var root = getRawEditorRoot(event.target);
+      if (!root || !getTransferMediaFiles(event.dataTransfer).length) return;
+
+      event.preventDefault();
+      root.dataset.draggingMedia = 'true';
+    }, true);
+
+    document.addEventListener('dragleave', function (event) {
+      var root = getRawEditorRoot(event.target);
+      if (!root) return;
+      root.dataset.draggingMedia = 'false';
+    }, true);
+
+    document.addEventListener('drop', function (event) {
+      var root = getRawEditorRoot(event.target);
+      if (!root) return;
+
+      var files = getTransferMediaFiles(event.dataTransfer);
+      if (!files.length) return;
+
+      event.preventDefault();
+      root.dataset.draggingMedia = 'false';
+      uploadFilesForRawEditor(root, files);
+    }, true);
   }
 
   function makeMediaControl(kind) {
@@ -433,8 +664,310 @@
     },
   });
 
+  function injectAdminMediaStyles() {
+    if (document.getElementById('blog-cms-media-styles')) return;
+
+    var style = document.createElement('style');
+    style.id = 'blog-cms-media-styles';
+    style.textContent = [
+      '.blog-cms-upload-status{position:absolute;right:12px;bottom:12px;z-index:10;max-width:min(420px,calc(100% - 24px));padding:8px 10px;border:1px solid #d9dee7;border-radius:6px;background:#f8fafc;color:#2f3b3f;font:12px/1.4 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 4px 12px rgba(15,23,42,.12);opacity:0;transform:translateY(4px);pointer-events:none;transition:opacity .16s ease,transform .16s ease;}',
+      '.blog-cms-upload-status[data-visible="true"]{opacity:1;transform:translateY(0);}',
+      '.blog-cms-upload-status[data-error="true"]{border-color:#f2b8b5;background:#fff1f0;color:#9f1d1d;}',
+      '.cms-editor-raw[data-dragging-media="true"] [contenteditable="true"],.cms-editor-raw[data-dragging-media="true"] textarea{outline:2px solid #3a6ea5;outline-offset:-2px;background:#f7fbff;}',
+      '.blog-cms-media-library{position:fixed;inset:0;z-index:99999;background:rgba(12,17,19,.58);display:flex;align-items:center;justify-content:center;padding:32px;}',
+      '.blog-cms-media-dialog{width:min(1280px,calc(100vw - 64px));height:min(820px,calc(100vh - 64px));background:#fdfdfb;color:#2f3b3f;border-radius:6px;box-shadow:0 24px 80px rgba(0,0,0,.34);display:grid;grid-template-rows:auto auto 1fr;}',
+      '.blog-cms-media-header,.blog-cms-media-tools{display:flex;align-items:center;gap:12px;padding:18px 22px;}',
+      '.blog-cms-media-header{justify-content:space-between;border-bottom:1px solid #e7e9ed;}',
+      '.blog-cms-media-header h2{margin:0;font:700 22px/1.2 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}',
+      '.blog-cms-media-close{border:0;background:transparent;font-size:30px;line-height:1;cursor:pointer;color:#1f2a2d;padding:4px 8px;}',
+      '.blog-cms-media-tools{border-bottom:1px solid #eceef2;flex-wrap:wrap;}',
+      '.blog-cms-media-search{flex:1 1 280px;min-width:220px;border:1px solid #dce1e8;border-radius:6px;padding:11px 12px;font:15px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}',
+      '.blog-cms-media-button{border:0;border-radius:5px;padding:11px 14px;background:#2f3b3f;color:#fff;font:700 14px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;cursor:pointer;}',
+      '.blog-cms-media-button.secondary{background:#eef1f6;color:#657080;}',
+      '.blog-cms-media-button:disabled{opacity:.5;cursor:not-allowed;}',
+      '.blog-cms-media-body{overflow:auto;padding:18px 22px;}',
+      '.blog-cms-media-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;}',
+      '.blog-cms-asset-card{border:1px solid #e2e6ec;background:#fff;border-radius:6px;padding:0;text-align:left;cursor:pointer;overflow:hidden;min-width:0;}',
+      '.blog-cms-asset-card[data-selected="true"]{border-color:#2f6fad;box-shadow:0 0 0 2px rgba(47,111,173,.24);}',
+      '.blog-cms-asset-preview{aspect-ratio:16/10;background:#f1f3f6;display:flex;align-items:center;justify-content:center;color:#697483;font:700 13px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}',
+      '.blog-cms-asset-preview img,.blog-cms-asset-preview video{width:100%;height:100%;object-fit:cover;display:block;}',
+      '.blog-cms-asset-meta{padding:10px 11px;display:grid;gap:5px;}',
+      '.blog-cms-asset-name{font:700 13px/1.25 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#2f3b3f;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+      '.blog-cms-asset-source{font:12px/1.3 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#6f7987;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+      '.blog-cms-media-empty{height:100%;min-height:320px;display:flex;align-items:center;justify-content:center;text-align:center;color:#5f6975;font:700 18px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}',
+      '.blog-cms-media-error{color:#9f1d1d;font:14px/1.4 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}',
+      '@media (max-width:700px){.blog-cms-media-library{padding:12px}.blog-cms-media-dialog{width:100%;height:100%;}.blog-cms-media-header,.blog-cms-media-tools{padding:14px}.blog-cms-media-body{padding:14px}.blog-cms-media-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));}}',
+    ].join('\n');
+    document.head.appendChild(style);
+  }
+
+  function registerPostMediaLibrary() {
+    if (!CMS.registerMediaLibrary) return;
+
+    CMS.registerMediaLibrary({
+      name: 'blog-media-assets',
+      init: async function (options) {
+        var handleInsert = options && options.handleInsert;
+        var state = {
+          assets: [],
+          error: '',
+          imagesOnly: false,
+          insertMode: false,
+          loading: false,
+          query: '',
+          selectedId: '',
+          uploading: false,
+          uploadProgress: 0,
+        };
+        var overlay;
+        var fileInput;
+
+        function selectedAsset() {
+          return state.assets.find(function (asset) {
+            return asset.id === state.selectedId;
+          });
+        }
+
+        function filteredAssets() {
+          var query = state.query.trim().toLowerCase();
+          return state.assets.filter(function (asset) {
+            if (state.imagesOnly && asset.kind !== 'image') return false;
+            if (!query) return true;
+            return [
+              asset.name,
+              asset.path,
+              asset.url,
+              asset.key,
+              asset.source,
+              asset.postTitle,
+            ].some(function (value) {
+              return String(value || '').toLowerCase().indexOf(query) !== -1;
+            });
+          });
+        }
+
+        function renderPreview(asset) {
+          var url = escapeAttr(asset.url || asset.path || '');
+          if (asset.kind === 'image' && url) {
+            return '<img src="' + url + '" alt="">';
+          }
+          if (asset.kind === 'video' && url) {
+            return '<video src="' + url + '" muted playsinline preload="metadata"></video>';
+          }
+          return escapeHtml((asset.kind || 'file').toUpperCase());
+        }
+
+        function renderGrid() {
+          if (state.loading) {
+            return '<div class="blog-cms-media-empty">Loading media assets...</div>';
+          }
+          if (state.error) {
+            return '<div class="blog-cms-media-empty"><span class="blog-cms-media-error">' + escapeHtml(state.error) + '</span></div>';
+          }
+
+          var assets = filteredAssets();
+          if (!assets.length) {
+            return '<div class="blog-cms-media-empty">No media assets found. Paste, drop, or upload an image/video in a post to add one.</div>';
+          }
+
+          return '<div class="blog-cms-media-grid">' + assets.map(function (asset) {
+            var source = asset.postTitle
+              ? asset.source + ': ' + asset.postTitle
+              : asset.source || asset.path || asset.url || '';
+            return [
+              '<button type="button" class="blog-cms-asset-card" data-asset-id="' + escapeAttr(asset.id) + '" data-selected="' + String(asset.id === state.selectedId) + '">',
+              '<span class="blog-cms-asset-preview">' + renderPreview(asset) + '</span>',
+              '<span class="blog-cms-asset-meta">',
+              '<span class="blog-cms-asset-name" title="' + escapeAttr(asset.name || asset.path || asset.url || '') + '">' + escapeHtml(asset.name || asset.path || asset.url || 'Media asset') + '</span>',
+              '<span class="blog-cms-asset-source" title="' + escapeAttr(source) + '">' + escapeHtml(source) + '</span>',
+              '</span>',
+              '</button>',
+            ].join('');
+          }).join('') + '</div>';
+        }
+
+        function render() {
+          var selected = selectedAsset();
+          var canUseSelected = !!selected;
+          var uploadLabel = state.uploading
+            ? 'Uploading ' + state.uploadProgress + '%'
+            : 'Upload';
+
+          overlay.innerHTML = [
+            '<div class="blog-cms-media-dialog" role="dialog" aria-modal="true" aria-label="Media assets">',
+            '<div class="blog-cms-media-header">',
+            '<h2>Media assets</h2>',
+            '<button type="button" class="blog-cms-media-close" data-action="close" aria-label="Close">×</button>',
+            '</div>',
+            '<div class="blog-cms-media-tools">',
+            '<input class="blog-cms-media-search" type="search" placeholder="Search by file, path, or post..." value="' + escapeAttr(state.query) + '">',
+            '<button type="button" class="blog-cms-media-button secondary" data-action="copy" ' + (canUseSelected ? '' : 'disabled') + '>Copy URL</button>',
+            '<button type="button" class="blog-cms-media-button secondary" data-action="download" ' + (canUseSelected ? '' : 'disabled') + '>Download</button>',
+            '<button type="button" class="blog-cms-media-button" data-action="insert" ' + (state.insertMode && canUseSelected ? '' : 'disabled') + '>Insert selected</button>',
+            '<button type="button" class="blog-cms-media-button" data-action="upload" ' + (state.uploading ? 'disabled' : '') + '>' + escapeHtml(uploadLabel) + '</button>',
+            '</div>',
+            '<div class="blog-cms-media-body">' + renderGrid() + '</div>',
+            '<input class="blog-cms-media-file" type="file" accept="image/*,video/*" multiple hidden>',
+            '</div>',
+          ].join('');
+
+          fileInput = overlay.querySelector('.blog-cms-media-file');
+          overlay.querySelector('.blog-cms-media-search').focus();
+        }
+
+        async function loadAssets() {
+          state.loading = true;
+          state.error = '';
+          render();
+
+          try {
+            var url = '/api/cms/media/assets' + (state.imagesOnly ? '?kind=image' : '');
+            var response = await fetch(url);
+            if (!response.ok) throw new Error('Could not load media assets.');
+            var payload = await response.json();
+            state.assets = Array.isArray(payload.assets) ? payload.assets : [];
+            state.selectedId = state.assets[0] ? state.assets[0].id : '';
+          } catch (error) {
+            state.error = error && error.message ? error.message : String(error);
+          } finally {
+            state.loading = false;
+            render();
+          }
+        }
+
+        function hide() {
+          if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+          overlay = null;
+        }
+
+        async function copySelected() {
+          var asset = selectedAsset();
+          if (!asset) return;
+
+          var url = asset.url || asset.path || asset.key || '';
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(url);
+          } else {
+            window.prompt('Copy media URL', url);
+          }
+        }
+
+        function downloadSelected() {
+          var asset = selectedAsset();
+          if (!asset || !asset.url) return;
+
+          var link = document.createElement('a');
+          link.href = asset.url;
+          link.download = asset.name || '';
+          link.target = '_blank';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+
+        function insertSelected() {
+          var asset = selectedAsset();
+          if (!asset || !handleInsert) return;
+          handleInsert(asset.url || asset.path || asset.key || '');
+          hide();
+        }
+
+        async function uploadLibraryFiles(files) {
+          var mediaFiles = fileListToArray(files).filter(function (file) {
+            return getMediaKind(file) !== 'file';
+          });
+          if (!mediaFiles.length) return;
+
+          state.uploading = true;
+          state.uploadProgress = 0;
+          render();
+
+          try {
+            for (var index = 0; index < mediaFiles.length; index += 1) {
+              var asset = await uploadFileToAsset(mediaFiles[index], function (progress) {
+                state.uploadProgress = progress;
+                render();
+              });
+              state.assets.unshift(Object.assign({}, asset, {
+                id: 's3:' + asset.key,
+                path: asset.url || asset.key,
+                source: 'Uploaded this session',
+              }));
+              state.selectedId = 's3:' + asset.key;
+            }
+          } catch (error) {
+            state.error = error && error.message ? error.message : String(error);
+          } finally {
+            state.uploading = false;
+            state.uploadProgress = 0;
+            render();
+          }
+        }
+
+        return {
+          show: function (showOptions) {
+            injectAdminMediaStyles();
+            state.imagesOnly = !!(showOptions && showOptions.imagesOnly);
+            state.insertMode = !!(showOptions && showOptions.id);
+            state.query = '';
+            state.selectedId = '';
+
+            overlay = document.createElement('div');
+            overlay.className = 'blog-cms-media-library';
+            document.body.appendChild(overlay);
+            render();
+            loadAssets();
+
+            overlay.addEventListener('click', function (event) {
+              var actionTarget = event.target.closest && event.target.closest('[data-action]');
+              var assetTarget = event.target.closest && event.target.closest('[data-asset-id]');
+
+              if (event.target === overlay || (actionTarget && actionTarget.dataset.action === 'close')) {
+                hide();
+                return;
+              }
+              if (assetTarget) {
+                state.selectedId = assetTarget.dataset.assetId;
+                render();
+                return;
+              }
+              if (!actionTarget) return;
+
+              if (actionTarget.dataset.action === 'copy') copySelected();
+              if (actionTarget.dataset.action === 'download') downloadSelected();
+              if (actionTarget.dataset.action === 'insert') insertSelected();
+              if (actionTarget.dataset.action === 'upload') fileInput.click();
+            });
+
+            overlay.addEventListener('input', function (event) {
+              if (event.target.classList.contains('blog-cms-media-search')) {
+                state.query = event.target.value;
+                render();
+              }
+            });
+
+            overlay.addEventListener('change', function (event) {
+              if (event.target.classList.contains('blog-cms-media-file')) {
+                uploadLibraryFiles(event.target.files).finally(function () {
+                  event.target.value = '';
+                });
+              }
+            });
+          },
+          hide: hide,
+          enableStandalone: function () {
+            return true;
+          },
+        };
+      },
+    });
+  }
+
   CMS.registerWidget('s3-image', makeMediaControl('image'), MediaPreview);
   CMS.registerWidget('s3-video', makeMediaControl('video'), MediaPreview);
+  registerPostMediaLibrary();
+  injectAdminMediaStyles();
+  registerRawMarkdownUploadHandlers();
 
   CMS.registerEditorComponent({
     id: 's3-image',
