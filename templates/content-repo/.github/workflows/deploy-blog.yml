@@ -1,0 +1,252 @@
+name: Blog Content Automation
+
+on:
+  push:
+    branches:
+      - {{BLOG_CONTENT_BRANCH}}
+    paths:
+      - posts/**
+      - categories/**
+      - media/**
+      - scripts/translate-posts.mjs
+      - .github/workflows/deploy-blog.yml
+  workflow_dispatch:
+    inputs:
+      force_translate:
+        description: Regenerate translations even when source hashes match
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: blog-content-automation
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  BLOG_AUTOMATION_MODE: ${{ vars.BLOG_AUTOMATION_MODE || '{{BLOG_AUTOMATION_MODE}}' }}
+  BLOG_DEPLOY_MODE: ${{ vars.BLOG_DEPLOY_MODE || '{{BLOG_DEPLOY_MODE}}' }}
+  BLOG_APP_REPOSITORY: ${{ vars.BLOG_APP_REPOSITORY || '{{BLOG_APP_REPOSITORY}}' }}
+  BLOG_APP_WORKFLOW_FILE: ${{ vars.BLOG_APP_WORKFLOW_FILE || 'build-image.yml' }}
+  BLOG_DISPATCH_EVENT: ${{ vars.BLOG_DISPATCH_EVENT || 'blog-content-updated' }}
+  BLOG_IMAGE: ${{ vars.BLOG_IMAGE || '{{BLOG_IMAGE}}' }}
+  ARGOCD_REPO_TOKEN_PRESENT: ${{ secrets.ARGOCD_REPO_TOKEN != '' }}
+  ARGOCD_REPO: ${{ vars.ARGOCD_REPO || 'owner/infra' }}
+  ARGOCD_BRANCH: ${{ vars.ARGOCD_BRANCH || 'main' }}
+  ARGOCD_BLOG_DEPLOYMENT: ${{ vars.ARGOCD_BLOG_DEPLOYMENT || 'path/to/deployment.yaml' }}
+  KUBE_CONFIG_PRESENT: ${{ secrets.KUBE_CONFIG != '' }}
+  KUBE_NAMESPACE: ${{ vars.KUBE_NAMESPACE || 'default' }}
+  KUBE_DEPLOYMENT: ${{ vars.KUBE_DEPLOYMENT || 'blog' }}
+  KUBE_CONTAINER: ${{ vars.KUBE_CONTAINER || 'blog' }}
+
+jobs:
+  translate-build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout content
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Translate posts
+        env:
+          TRANSLATION_OPENAI_API_KEY: ${{ secrets.TRANSLATION_OPENAI_API_KEY }}
+          TRANSLATION_OPENAI_BASE_URL: ${{ secrets.TRANSLATION_OPENAI_BASE_URL }}
+          TRANSLATION_OPENAI_MODEL: ${{ vars.TRANSLATION_OPENAI_MODEL }}
+          TRANSLATION_LANGUAGES: ${{ vars.TRANSLATION_LANGUAGES }}
+          TRANSLATION_SOURCE_LANGUAGE: ${{ vars.TRANSLATION_SOURCE_LANGUAGE }}
+          TRANSLATION_SOURCE_LANG: ${{ vars.TRANSLATION_SOURCE_LANG }}
+          TRANSLATION_BODY_CHUNK_CHARS: ${{ vars.TRANSLATION_BODY_CHUNK_CHARS }}
+          TRANSLATION_REQUEST_TIMEOUT_MS: ${{ vars.TRANSLATION_REQUEST_TIMEOUT_MS }}
+          TRANSLATION_MAX_RETRIES: ${{ vars.TRANSLATION_MAX_RETRIES }}
+          TRANSLATION_FORCE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.force_translate == 'true' && 'true' || 'false' }}
+        run: node scripts/translate-posts.mjs
+
+      - name: Commit translations
+        run: |
+          if [ -z "$(git status --porcelain -- translations)" ]; then
+            echo "No translation changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add translations
+          git commit -m "Update generated translations"
+          git push
+
+      - name: Validate build dispatch configuration
+        if: env.BLOG_AUTOMATION_MODE == 'build' || env.BLOG_AUTOMATION_MODE == 'deploy'
+        env:
+          GH_TOKEN: ${{ secrets.BLOG_DEPLOY_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::Set BLOG_DEPLOY_DISPATCH_TOKEN to a token that can dispatch ${BLOG_APP_REPOSITORY} and read its workflow runs."
+            exit 1
+          fi
+
+      - name: Dispatch blog image build
+        if: env.BLOG_AUTOMATION_MODE == 'build' || env.BLOG_AUTOMATION_MODE == 'deploy'
+        id: dispatch
+        env:
+          GH_TOKEN: ${{ secrets.BLOG_DEPLOY_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          COMMIT_SHA="$(git rev-parse HEAD)"
+          DISPATCHED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          echo "content_sha=${COMMIT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "dispatched_at=${DISPATCHED_AT}" >> "$GITHUB_OUTPUT"
+
+          gh api "repos/${BLOG_APP_REPOSITORY}/dispatches" \
+            --method POST \
+            --field "event_type=${BLOG_DISPATCH_EVENT}" \
+            --field "client_payload[content_sha]=${COMMIT_SHA}" \
+            --field "client_payload[image_tag]=${COMMIT_SHA}"
+
+      - name: Wait for blog image build
+        if: env.BLOG_AUTOMATION_MODE == 'build' || env.BLOG_AUTOMATION_MODE == 'deploy'
+        env:
+          GH_TOKEN: ${{ secrets.BLOG_DEPLOY_DISPATCH_TOKEN }}
+          DISPATCHED_AT: ${{ steps.dispatch.outputs.dispatched_at }}
+          CONTENT_SHA: ${{ steps.dispatch.outputs.content_sha }}
+        run: |
+          set -euo pipefail
+
+          run_id=""
+          for attempt in $(seq 1 90); do
+            run_id="$(gh run list \
+              --repo "${BLOG_APP_REPOSITORY}" \
+              --workflow "${BLOG_APP_WORKFLOW_FILE}" \
+              --event repository_dispatch \
+              --limit 20 \
+              --json databaseId,createdAt,displayTitle \
+              --jq ".[] | select(.createdAt >= \"${DISPATCHED_AT}\" and .displayTitle == \"Build ${CONTENT_SHA}\") | .databaseId" \
+              | head -n 1)"
+
+            if [ -n "${run_id}" ]; then
+              echo "Found ${BLOG_APP_WORKFLOW_FILE} run ${run_id}."
+              break
+            fi
+
+            echo "Waiting for ${BLOG_APP_WORKFLOW_FILE} run to start (${attempt}/90)..."
+            sleep 10
+          done
+
+          if [ -z "${run_id}" ]; then
+            echo "::error::Timed out waiting for ${BLOG_APP_WORKFLOW_FILE} to start."
+            exit 1
+          fi
+
+          gh run watch "${run_id}" --repo "${BLOG_APP_REPOSITORY}" --exit-status
+
+      - name: Validate deployment configuration
+        if: env.BLOG_AUTOMATION_MODE == 'deploy'
+        run: |
+          set -euo pipefail
+
+          case "${BLOG_DEPLOY_MODE}" in
+            gitops)
+              if [ "${ARGOCD_REPO_TOKEN_PRESENT}" != "true" ]; then
+                echo "::error::Set ARGOCD_REPO_TOKEN or change BLOG_DEPLOY_MODE."
+                exit 1
+              fi
+              ;;
+            kubectl)
+              if [ "${KUBE_CONFIG_PRESENT}" != "true" ]; then
+                echo "::error::Set KUBE_CONFIG or change BLOG_DEPLOY_MODE."
+                exit 1
+              fi
+              ;;
+            either)
+              if [ "${ARGOCD_REPO_TOKEN_PRESENT}" != "true" ] && [ "${KUBE_CONFIG_PRESENT}" != "true" ]; then
+                echo "::error::Set ARGOCD_REPO_TOKEN or KUBE_CONFIG."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::BLOG_DEPLOY_MODE must be gitops, kubectl, or either."
+              exit 1
+              ;;
+          esac
+
+      - name: Checkout deployment repo
+        if: env.BLOG_AUTOMATION_MODE == 'deploy' && (env.BLOG_DEPLOY_MODE == 'gitops' || env.BLOG_DEPLOY_MODE == 'either') && env.ARGOCD_REPO_TOKEN_PRESENT == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.ARGOCD_REPO }}
+          ref: ${{ env.ARGOCD_BRANCH }}
+          token: ${{ secrets.ARGOCD_REPO_TOKEN }}
+          path: deployment
+
+      - name: Update GitOps image tag
+        if: env.BLOG_AUTOMATION_MODE == 'deploy' && (env.BLOG_DEPLOY_MODE == 'gitops' || env.BLOG_DEPLOY_MODE == 'either') && env.ARGOCD_REPO_TOKEN_PRESENT == 'true'
+        env:
+          CONTENT_SHA: ${{ steps.dispatch.outputs.content_sha }}
+        run: |
+          set -euo pipefail
+
+          manifest="deployment/${ARGOCD_BLOG_DEPLOYMENT}"
+          image_with_tag="${BLOG_IMAGE}:${CONTENT_SHA}"
+
+          if [ ! -f "${manifest}" ]; then
+            echo "::error::Deployment manifest not found: ${manifest}"
+            exit 1
+          fi
+
+          awk -v container="${KUBE_CONTAINER}" -v image="${image_with_tag}" '
+            $0 ~ "^[[:space:]]*- name: " container "$" { in_container = 1 }
+            in_container && $0 ~ "^[[:space:]]*image:" {
+              sub(/image:.*/, "image: " image)
+              in_container = 0
+            }
+            { print }
+          ' "${manifest}" > "${manifest}.tmp"
+          mv "${manifest}.tmp" "${manifest}"
+
+          cd deployment
+          if git diff --quiet -- "${ARGOCD_BLOG_DEPLOYMENT}"; then
+            echo "Deployment manifest already points to ${image_with_tag}."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "${ARGOCD_BLOG_DEPLOYMENT}"
+          git commit -m "Deploy blog ${CONTENT_SHA}"
+          git push
+
+      - name: Set up kubectl
+        if: env.BLOG_AUTOMATION_MODE == 'deploy' && (env.BLOG_DEPLOY_MODE == 'kubectl' || (env.BLOG_DEPLOY_MODE == 'either' && env.ARGOCD_REPO_TOKEN_PRESENT != 'true')) && env.KUBE_CONFIG_PRESENT == 'true'
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        if: env.BLOG_AUTOMATION_MODE == 'deploy' && (env.BLOG_DEPLOY_MODE == 'kubectl' || (env.BLOG_DEPLOY_MODE == 'either' && env.ARGOCD_REPO_TOKEN_PRESENT != 'true')) && env.KUBE_CONFIG_PRESENT == 'true'
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          mkdir -p ~/.kube
+          if printf '%s' "$KUBE_CONFIG" | grep -q 'apiVersion:'; then
+            printf '%s' "$KUBE_CONFIG" > ~/.kube/config
+          else
+            printf '%s' "$KUBE_CONFIG" | base64 --decode > ~/.kube/config
+          fi
+          chmod 600 ~/.kube/config
+
+      - name: Deploy blog image
+        if: env.BLOG_AUTOMATION_MODE == 'deploy' && (env.BLOG_DEPLOY_MODE == 'kubectl' || (env.BLOG_DEPLOY_MODE == 'either' && env.ARGOCD_REPO_TOKEN_PRESENT != 'true')) && env.KUBE_CONFIG_PRESENT == 'true'
+        env:
+          CONTENT_SHA: ${{ steps.dispatch.outputs.content_sha }}
+        run: |
+          IMAGE_WITH_TAG="${BLOG_IMAGE}:${CONTENT_SHA}"
+          kubectl -n "${KUBE_NAMESPACE}" set image "deployment/${KUBE_DEPLOYMENT}" "${KUBE_CONTAINER}=${IMAGE_WITH_TAG}"
+          kubectl -n "${KUBE_NAMESPACE}" rollout status "deployment/${KUBE_DEPLOYMENT}" --timeout=300s
+
+      - name: Report completion
+        run: |
+          echo "Blog content automation finished in ${BLOG_AUTOMATION_MODE} mode."

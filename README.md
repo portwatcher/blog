@@ -41,13 +41,20 @@ The app can run against local Markdown under `content/`, but production-style us
 
 Content lives in a separate Git repository. This app repo owns Nuxt, Decap, media upload endpoints, the Docker image recipe, and reusable deployment examples. Each site owner should keep real deployment credentials and infrastructure state in their own private repo.
 
-To bootstrap a content repository from the bundled template:
+To bootstrap a content repository from the bundled template, run the guided initializer:
 
 ```bash
-pnpm content:init --target ../my-blog-content
+pnpm content:init
 ```
 
-The initializer copies `templates/content-repo`, fills repository-specific placeholders, creates an initial git commit by default, and prints the next steps for creating the private repo and configuring runtime envs.
+The initializer copies `templates/content-repo`, fills repository-specific placeholders, creates an initial git commit by default, and prints the next steps for creating the private repo and configuring runtime envs. In interactive mode it asks for:
+
+- target directory
+- app repository and content repository
+- content branch
+- initial post title
+- automation mode: content only, translations, image build dispatch, or deployment
+- optional GitHub repository creation through `gh`
 
 For non-interactive setup:
 
@@ -56,7 +63,20 @@ pnpm content:init \
   --yes \
   --target ../my-blog-content \
   --app-repo owner/blog \
-  --content-repo owner/blog-content
+  --content-repo owner/blog-content \
+  --automation content
+```
+
+To generate a private content repo with translation and deployment automation:
+
+```bash
+pnpm content:init \
+  --target ../my-blog-content \
+  --app-repo owner/blog \
+  --content-repo owner/blog-content \
+  --automation deploy \
+  --deploy-mode gitops \
+  --github
 ```
 
 After creating the generated repository, set these envs in local dev and in the deployment that runs the image:
@@ -98,7 +118,7 @@ title: Your Title
 description: Short summary
 category: Technology
 date: 2026-05-23 20:31
-status: public
+status: draft
 cover:
   provider: s3
   key: blog-media/2026/05/23/example.webp
@@ -107,7 +127,7 @@ cover:
 Your content goes here.
 ```
 
-Set `status: private` to hide an article behind the article password.
+Set `status: draft` to keep an article out of listings and direct article responses. Set `status: private` to hide an article behind the article password, or `status: public` to publish it.
 
 Generated translations are read from `translations/**/*.md`. Configure visible/generated languages with:
 
@@ -117,6 +137,19 @@ NUXT_PUBLIC_ORIGINAL_LANGUAGE=zh
 ```
 
 Translated article pages are available with `?lang=<code>` on the original article URL, for example `/articles/Your%20Title?lang=en`.
+
+### GitHub Template Onboarding
+
+For teams, the lowest-friction onboarding path is to create each private content repo from the sanitized content template: [portwatcher/blog-content-template](https://github.com/portwatcher/blog-content-template). Keep each developer's real content repo private.
+
+Recommended repository split:
+
+1. App repo: create from [portwatcher/blog](https://github.com/portwatcher/blog) or fork it if you want an upstream update path.
+2. Content template repo: [portwatcher/blog-content-template](https://github.com/portwatcher/blog-content-template), generated from `templates/content-repo`.
+3. Content repo: private repo created from the content template or from `pnpm content:init`.
+4. Infrastructure repo or platform: stores runtime secrets, image pull secrets, and deployment manifests.
+
+GitHub template repositories are best for initial scaffolding. They do not provide an easy upstream update path, so keep reusable app behavior in this app repo and keep content-template files small and generic.
 
 ## Decap CMS Auth
 
@@ -194,7 +227,7 @@ S3_CORS_ALLOWED_ORIGINS=http://localhost:3000 pnpm cms:s3-cors
 
 The required S3 CORS rule exposes the `ETag` header, which multipart completion needs.
 
-In Markdown body content, use the Decap editor components or write MDC manually:
+In Markdown body content, use the Decap editor components, paste/drop an image or video in Markdown mode, or write MDC manually:
 
 ```md
 ::s3-image{objectKey="blog-media/2026/05/23/diagram.webp" alt="Diagram"}
