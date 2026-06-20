@@ -1,7 +1,11 @@
 import { readdir, stat } from 'node:fs/promises'
 import { basename, extname, join, relative, sep } from 'node:path'
 import { getRuntimeContent } from '../../../utils/runtime-content'
-import { getPublicMediaUrl, getS3MediaConfig } from '../../../utils/s3-media'
+import {
+  assertCmsMediaLibraryAuthorized,
+  getPublicMediaUrl,
+  getS3MediaConfig,
+} from '../../../utils/s3-media'
 
 type MediaKind = 'image' | 'video' | 'file'
 
@@ -302,6 +306,8 @@ const addStaticPublicAssets = async (assets: Map<string, CmsMediaAsset>) => {
 }
 
 export default defineEventHandler(async (event) => {
+  await assertCmsMediaLibraryAuthorized(event)
+
   const query = getQuery(event)
   const kind = String(query.kind || '').trim().toLowerCase()
   const search = String(query.search || '').trim().toLowerCase()

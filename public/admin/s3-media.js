@@ -133,24 +133,30 @@
     if (token) window.sessionStorage.setItem('blogCmsUploadToken', token);
   }
 
-  async function cmsJson(url, body, retried) {
-    var headers = { 'content-type': 'application/json' };
+  function getCmsAuthHeaders() {
+    var headers = {};
     var token = getUploadToken();
     var githubToken = getCmsGithubToken();
     if (token) headers['x-cms-upload-token'] = token;
     if (githubToken) headers.authorization = 'Bearer ' + githubToken;
+    return headers;
+  }
+
+  async function cmsFetchJson(url, options, retried) {
+    var requestOptions = options || {};
+    var headers = Object.assign({}, requestOptions.headers || {}, getCmsAuthHeaders());
 
     var response = await fetch(url, {
-      method: 'POST',
+      method: requestOptions.method || 'GET',
       headers: headers,
-      body: JSON.stringify(body),
+      body: requestOptions.body,
     });
 
     if (response.status === 401 && !retried) {
       var nextToken = window.prompt('CMS upload token');
       if (nextToken) {
         setUploadToken(nextToken);
-        return cmsJson(url, body, true);
+        return cmsFetchJson(url, options, true);
       }
     }
 
@@ -164,6 +170,18 @@
     }
 
     return response.json();
+  }
+
+  async function cmsJson(url, body, retried) {
+    return cmsFetchJson(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }, retried);
+  }
+
+  async function cmsGetJson(url, retried) {
+    return cmsFetchJson(url, { method: 'GET' }, retried);
   }
 
   function backupFields(backup) {
@@ -822,9 +840,7 @@
 
           try {
             var url = '/api/cms/media/assets' + (state.imagesOnly ? '?kind=image' : '');
-            var response = await fetch(url);
-            if (!response.ok) throw new Error('Could not load media assets.');
-            var payload = await response.json();
+            var payload = await cmsGetJson(url);
             state.assets = Array.isArray(payload.assets) ? payload.assets : [];
             state.selectedId = state.assets[0] ? state.assets[0].id : '';
           } catch (error) {

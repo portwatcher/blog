@@ -91,9 +91,10 @@ const getAuthorizationToken = (event: H3Event) => {
   return match?.[1] || ''
 }
 
-export const assertCmsUploadAuthorized = async (event: H3Event) => {
+const assertCmsMediaAuthorized = async (event: H3Event, actionLabel: string) => {
   const config = getS3MediaConfig(event)
   const provided = getHeader(event, 'x-cms-upload-token') || ''
+  const githubAuthEnabled = getCmsAuthMode(event) === 'github-oauth'
 
   if (config.uploadToken) {
     const providedBuffer = Buffer.from(provided)
@@ -107,7 +108,7 @@ export const assertCmsUploadAuthorized = async (event: H3Event) => {
     }
   }
 
-  if (getCmsAuthMode(event) === 'github-oauth') {
+  if (githubAuthEnabled) {
     const githubToken = getAuthorizationToken(event)
     if (githubToken) {
       await assertCmsGitHubTokenCanWriteContentRepo(event, githubToken)
@@ -120,12 +121,18 @@ export const assertCmsUploadAuthorized = async (event: H3Event) => {
   }
 
   throw createError({
-    statusCode: config.uploadToken ? 401 : 500,
-    statusMessage: config.uploadToken
-      ? 'CMS upload token or GitHub authorization required'
+    statusCode: config.uploadToken || githubAuthEnabled ? 401 : 500,
+    statusMessage: config.uploadToken || githubAuthEnabled
+      ? `CMS authorization required for ${actionLabel}`
       : 'CMS_UPLOAD_TOKEN must be set before media uploads are enabled unless GitHub OAuth is enabled',
   })
 }
+
+export const assertCmsUploadAuthorized = async (event: H3Event) =>
+  assertCmsMediaAuthorized(event, 'media uploads')
+
+export const assertCmsMediaLibraryAuthorized = async (event: H3Event) =>
+  assertCmsMediaAuthorized(event, 'the media library')
 
 export const createS3Client = (config = getS3MediaConfig()) => {
   return new S3Client({
