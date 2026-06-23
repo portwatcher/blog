@@ -77,7 +77,7 @@ BLOG_AUTOMATION_MODE={{BLOG_AUTOMATION_MODE}}
 
 ### Translation
 
-Translation is optional. If the API key is not set, the workflow skips translation and still succeeds.
+Translation is optional. If the API key is not set, the workflow skips generated translations and still detects source article language metadata.
 
 ```env
 # secrets
@@ -94,7 +94,7 @@ TRANSLATION_REQUEST_TIMEOUT_MS=180000
 TRANSLATION_MAX_RETRIES=3
 ```
 
-Set `lang` in a post's frontmatter when its original language is not the default source language. For example, `lang: ja` keeps a Japanese source article canonical and skips generated Japanese translations for it.
+The workflow detects each source post's original language from its title, description, and body whenever posts are published or updated. It writes `lang` for non-default source languages, corrects stale `lang` values, and skips generated translations for the detected source language.
 
 Run the workflow manually with `force_translate=true` to regenerate all translations even when source hashes have not changed.
 

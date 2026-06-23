@@ -73,6 +73,67 @@ const getLanguageName = (lang) =>
   normalizedLanguageNames.get(languageBase(lang)) ||
   String(lang || '')
 
+const stripMarkdownNoise = (value) =>
+  String(value || '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/~~~[\s\S]*?~~~/g, ' ')
+    .replace(/`[^`\n]*`/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/!\[[^\]]*]\([^)]*\)/g, ' ')
+    .replace(/\[[^\]]*]\([^)]*\)/g, ' ')
+    .replace(/https?:\/\/\S+/g, ' ')
+
+const countLanguageSignals = (value) => {
+  const counts = {
+    kana: 0,
+    han: 0,
+    latin: 0,
+  }
+
+  for (const character of value) {
+    if (/^[\u3040-\u309f\u30a0-\u30ff\u31f0-\u31ff]$/u.test(character)) {
+      counts.kana += 1
+    } else if (/^[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]$/u.test(character)) {
+      counts.han += 1
+    } else if (/^[A-Za-z]$/.test(character)) {
+      counts.latin += 1
+    }
+  }
+
+  return counts
+}
+
+const detectArticleLanguage = ({ title, description, body }) => {
+  const cleanTitle = stripMarkdownNoise(title)
+  const cleanDescription = stripMarkdownNoise(description)
+  const cleanBody = stripMarkdownNoise(String(body || '').slice(0, 30000))
+  const titleCounts = countLanguageSignals(cleanTitle)
+  const weightedText = [
+    cleanTitle,
+    cleanTitle,
+    cleanTitle,
+    cleanTitle,
+    cleanTitle,
+    cleanDescription,
+    cleanDescription,
+    cleanDescription,
+    cleanBody,
+  ].join('\n')
+  const counts = countLanguageSignals(weightedText)
+  const cjkCount = counts.kana + counts.han
+  const kanaRatio = counts.kana / Math.max(1, cjkCount)
+
+  if (titleCounts.kana >= 2 && counts.kana >= 3) return 'ja'
+  if (counts.kana >= 80 && kanaRatio >= 0.2) return 'ja'
+  if (counts.kana >= 20 && kanaRatio >= 0.35) return 'ja'
+  if (counts.han >= 8 && counts.han >= counts.latin * 0.35) return 'zh'
+  if (counts.latin >= 20 && counts.latin >= cjkCount * 1.5) return 'en'
+
+  return ''
+}
+
+const getDefaultSourceLang = () => normalizeLanguage(config.sourceLangCode || 'zh')
+
 const sha256 = (value) => createHash('sha256').update(value).digest('hex')
 
 const walkMarkdownFiles = async (dir) => {
@@ -139,6 +200,9 @@ const upsertFrontmatterValue = (frontmatter, key, value) => {
 
   return `${frontmatter.replace(/\s*$/, '')}\n${line}\n`
 }
+
+const serializeMarkdownDocument = (frontmatter, body) =>
+  `---\n${frontmatter.trim()}\n---\n${String(body || '').startsWith('\n') ? body : `\n${body || ''}`}`
 
 const parseJsonResponse = (content) => {
   const trimmed = String(content || '').trim()
@@ -357,14 +421,15 @@ const translateArticle = async ({ lang, sourceLanguage, title, description, body
 }
 
 const translateFile = async (sourcePath) => {
-  const sourceContent = await readFile(sourcePath, 'utf8')
-  const sourceHash = sha256(sourceContent)
+  let sourceContent = await readFile(sourcePath, 'utf8')
   const sourceRelativePath = relative(rootDir, sourcePath).replaceAll('\\', '/')
   const postRelativePath = relative(join(rootDir, config.postsDir), sourcePath).replaceAll('\\', '/')
-  const { frontmatter, body } = splitFrontmatter(sourceContent, sourceRelativePath)
+  let { frontmatter, body } = splitFrontmatter(sourceContent, sourceRelativePath)
   const title = parseFrontmatterString(frontmatter, 'title')
   const description = parseFrontmatterString(frontmatter, 'description')
-  const sourceLang = parseFrontmatterString(frontmatter, 'lang') || config.sourceLangCode
+  const declaredSourceLang = parseFrontmatterString(frontmatter, 'lang')
+  const detectedSourceLang = detectArticleLanguage({ title, description, body })
+  const sourceLang = detectedSourceLang || declaredSourceLang || config.sourceLangCode
   const sourceLanguage = sourceLang ? getLanguageName(sourceLang) : config.sourceLanguage
   let changed = false
 
@@ -372,6 +437,20 @@ const translateFile = async (sourcePath) => {
     console.log(`Skipping ${sourceRelativePath}: missing title`)
     return false
   }
+
+  if (
+    detectedSourceLang &&
+    !languagesAlign(declaredSourceLang, detectedSourceLang) &&
+    (declaredSourceLang || !languagesAlign(detectedSourceLang, getDefaultSourceLang()))
+  ) {
+    frontmatter = upsertFrontmatterValue(frontmatter, 'lang', detectedSourceLang)
+    sourceContent = serializeMarkdownDocument(frontmatter, body)
+    await writeFile(sourcePath, sourceContent, 'utf8')
+    console.log(`Detected source language ${detectedSourceLang}: ${sourceRelativePath}`)
+    changed = true
+  }
+
+  const sourceHash = sha256(sourceContent)
 
   for (const lang of config.languages) {
     const outputPath = join(rootDir, config.outputDir, lang, postRelativePath)
@@ -385,6 +464,10 @@ const translateFile = async (sourcePath) => {
       } else {
         console.log(`Skipping ${sourceRelativePath} -> ${lang}: source language is ${sourceLang}`)
       }
+      continue
+    }
+
+    if (!config.apiKey) {
       continue
     }
 
@@ -416,13 +499,11 @@ const translateFile = async (sourcePath) => {
 
 const main = async () => {
   if (!config.apiKey) {
-    console.log('Skipping translation: TRANSLATION_OPENAI_API_KEY is not configured.')
-    return
+    console.log('Skipping generated translations: TRANSLATION_OPENAI_API_KEY is not configured.')
   }
 
   if (config.languages.length === 0) {
-    console.log('Skipping translation: TRANSLATION_LANGUAGES did not include any languages.')
-    return
+    console.log('Skipping generated translations: TRANSLATION_LANGUAGES did not include any languages.')
   }
 
   const postFiles = await walkMarkdownFiles(join(rootDir, config.postsDir))
@@ -433,7 +514,7 @@ const main = async () => {
     changed = await translateFile(postFile) || changed
   }
 
-  console.log(changed ? 'Translations updated.' : 'Translations already current.')
+  console.log(changed ? 'Content language metadata or translations updated.' : 'Content language metadata and translations already current.')
 }
 
 main().catch((error) => {

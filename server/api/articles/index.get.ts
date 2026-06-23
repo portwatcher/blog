@@ -5,6 +5,7 @@ import {
   noteFailedAttempt,
   noteSuccessfulUnlock,
 } from '../../utils/ratelimit'
+import { detectArticleLanguage } from '../../utils/language'
 import { getRuntimeContent } from '../../utils/runtime-content'
 
 const limit = 10
@@ -34,8 +35,20 @@ const languagesAlign = (left: unknown, right: unknown) => {
   return normalizedLeft === normalizedRight || languageBase(normalizedLeft) === languageBase(normalizedRight)
 }
 
-const getArticleSourceLang = (article: ArticleDocument, config: ReturnType<typeof useRuntimeConfig>) =>
-  String(article.lang || config.public.originalLanguage || 'zh')
+const getArticleSourceLang = (article: ArticleDocument, config: ReturnType<typeof useRuntimeConfig>) => {
+  const declaredLang = normalizeLanguage(article.lang)
+  const detectedLang = detectArticleLanguage({
+    title: article.title,
+    description: article.description,
+    body: getTextFromContentNode(article.body),
+  })
+
+  if (detectedLang && (!declaredLang || !languagesAlign(declaredLang, detectedLang))) {
+    return detectedLang
+  }
+
+  return declaredLang || String(config.public.originalLanguage || 'zh')
+}
 
 const getRequestedTranslationLang = (
   queryLang: unknown,
