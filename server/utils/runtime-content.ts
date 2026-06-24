@@ -37,6 +37,7 @@ interface RuntimeContentConfig {
   articleIncludes: string[]
   translationIncludes: string[]
   cacheTtlMs: number
+  mediaBaseUrl: string
   key: string
 }
 
@@ -126,9 +127,55 @@ const matchesAnyPattern = (relativePath: string, patterns: string[]) =>
 const tokenHash = (token?: string) =>
   token ? createHash('sha256').update(token).digest('hex').slice(0, 16) : ''
 
+const normalizeManagedMediaKey = (value: string) => {
+  const withoutQuery = value.split(/[?#]/)[0]
+
+  try {
+    return withoutQuery
+      .split('/')
+      .map(decodeURIComponent)
+      .join('/')
+  } catch (_error) {
+    return withoutQuery
+  }
+}
+
+const getManagedMediaProxyUrl = (value: unknown, config: RuntimeContentConfig) => {
+  const url = String(value || '').trim()
+  const mediaBaseUrl = config.mediaBaseUrl.replace(/\/+$/, '')
+
+  if (!url || !mediaBaseUrl || !url.startsWith(`${mediaBaseUrl}/`)) return undefined
+
+  const key = normalizeManagedMediaKey(url.slice(mediaBaseUrl.length + 1))
+  return key ? `/api/cms/media/object?key=${encodeURIComponent(key)}` : undefined
+}
+
+const rewriteManagedMediaUrls = <T>(value: T, config: RuntimeContentConfig): T => {
+  if (!config.mediaBaseUrl || value === null || value === undefined) return value
+  if (typeof value !== 'object') return value
+  if (Array.isArray(value)) {
+    return value.map((item) => rewriteManagedMediaUrls(item, config)) as T
+  }
+
+  const next: Record<string, any> = { ...(value as Record<string, any>) }
+
+  for (const [key, child] of Object.entries(next)) {
+    if ((key === 'src' || key === 'poster') && typeof child === 'string') {
+      next[key] = getManagedMediaProxyUrl(child, config) || child
+      continue
+    }
+
+    next[key] = rewriteManagedMediaUrls(child, config)
+  }
+
+  return next as T
+}
+
 const getRuntimeContentConfig = (event?: H3Event): RuntimeContentConfig => {
   const config = useRuntimeConfig(event)
   const publicRepo = readString(config.public.cmsContentRepo, ['NUXT_PUBLIC_CMS_CONTENT_REPO'])
+  const mediaBaseUrl = readString(config.public.mediaBaseUrl, ['NUXT_PUBLIC_MEDIA_BASE_URL'])
+    .replace(/\/+$/, '')
   const repository = readString(
     undefined,
     ['BLOG_CONTENT_REPOSITORY'],
@@ -173,6 +220,7 @@ const getRuntimeContentConfig = (event?: H3Event): RuntimeContentConfig => {
     articleIncludes,
     translationIncludes,
     token: tokenHash(authToken),
+    mediaBaseUrl,
   })
 
   return {
@@ -184,6 +232,7 @@ const getRuntimeContentConfig = (event?: H3Event): RuntimeContentConfig => {
     articleIncludes,
     translationIncludes,
     cacheTtlMs,
+    mediaBaseUrl,
     key,
   }
 }
@@ -344,7 +393,8 @@ const parserPromise = createMarkdownParser({
 const parseMarkdownDocument = async (
   file: FileRef,
   root: string,
-  collection: 'articles' | 'translations'
+  collection: 'articles' | 'translations',
+  config: RuntimeContentConfig
 ) => {
   const parser = await parserPromise
   const raw = await readFile(file.absolutePath, 'utf8')
@@ -362,7 +412,8 @@ const parseMarkdownDocument = async (
   const path = documentPathFromStem(stem)
   const title = String(data.title || basename(stem) || file.relativePath)
   const category = String(data.category || getDefaultCategory(file.relativePath))
-  const body = parsed.toc ? { ...parsed.body, toc: parsed.toc } : parsed.body
+  const rawBody = parsed.toc ? { ...parsed.body, toc: parsed.toc } : parsed.body
+  const body = rewriteManagedMediaUrls(rawBody, config)
 
   return {
     ...data,
@@ -393,8 +444,8 @@ const loadRuntimeContentFromRoot = async (root: string, config: RuntimeContentCo
     !matchesAnyPattern(file.relativePath, config.translationIncludes)
   )
   const [articles, translations] = await Promise.all([
-    Promise.all(articleFiles.map((file) => parseMarkdownDocument(file, root, 'articles'))),
-    Promise.all(translationFiles.map((file) => parseMarkdownDocument(file, root, 'translations'))),
+    Promise.all(articleFiles.map((file) => parseMarkdownDocument(file, root, 'articles', config))),
+    Promise.all(translationFiles.map((file) => parseMarkdownDocument(file, root, 'translations', config))),
   ])
 
   return {
