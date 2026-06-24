@@ -16,6 +16,20 @@
     return value;
   }
 
+  function toDecapControlValue(currentValue, nextValue) {
+    if (currentValue && typeof currentValue.merge === 'function') {
+      return currentValue.merge(nextValue);
+    }
+    return nextValue;
+  }
+
+  function emptyDecapControlValue(currentValue) {
+    if (currentValue && typeof currentValue.clear === 'function') {
+      return currentValue.clear();
+    }
+    return null;
+  }
+
   function fieldGet(field, key, fallback) {
     if (!field) return fallback;
     if (typeof field.get === 'function') {
@@ -654,7 +668,7 @@
             ? await readImageDimensions(file)
             : await readVideoDimensions(file);
 
-          this.props.onChange(Object.assign({}, existing, dimensions, {
+          this.props.onChange(toDecapControlValue(this.props.value, Object.assign({}, existing, dimensions, {
             provider: 's3',
             key: result.key,
             url: result.publicUrl || getAssetUrl({ key: result.key }),
@@ -664,7 +678,7 @@
             contentType: file.type || '',
             size: file.size,
             kind: kind,
-          }, backupFields(result.backup)));
+          }, backupFields(result.backup))));
           this.setState({
             progress: 100,
             uploading: false,
@@ -684,11 +698,11 @@
 
       handleAltChange: function (event) {
         var existing = valueToJS(this.props.value);
-        this.props.onChange(Object.assign({}, existing, { alt: event.target.value }));
+        this.props.onChange(toDecapControlValue(this.props.value, Object.assign({}, existing, { alt: event.target.value })));
       },
 
       handleClear: function () {
-        this.props.onChange(null);
+        this.props.onChange(emptyDecapControlValue(this.props.value));
       },
 
       handleChooseExisting: function () {
@@ -706,9 +720,12 @@
             var existing = valueToJS(component.props.value);
             var nextAsset = assetToWidgetValue(asset, kind);
 
-            component.props.onChange(Object.assign({}, existing, nextAsset, {
-              alt: existing.alt || nextAsset.alt || '',
-            }));
+            component.props.onChange(toDecapControlValue(
+              component.props.value,
+              Object.assign({}, existing, nextAsset, {
+                alt: existing.alt || nextAsset.alt || '',
+              })
+            ));
             component.setState({ error: '' });
           },
         });
@@ -726,7 +743,7 @@
             filename: asset.filename || '',
           });
 
-          this.props.onChange(Object.assign({}, asset, backupFields(backup)));
+          this.props.onChange(toDecapControlValue(this.props.value, Object.assign({}, asset, backupFields(backup))));
           this.setState({
             progress: backup.status === 'failed' ? 0 : 100,
             uploading: false,
