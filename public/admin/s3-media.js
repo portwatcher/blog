@@ -629,6 +629,16 @@
         };
       },
 
+      componentDidMount: function () {
+        var component = this;
+        if (kind !== 'video' || !this.props.isEditorComponent || !this.props.isNewEditorComponent) return;
+        if (valueToJS(this.props.value).key) return;
+
+        window.setTimeout(function () {
+          if (!valueToJS(component.props.value).key) component.handleChooseExisting();
+        }, 0);
+      },
+
       handleUpload: async function (event) {
         var file = event.target.files && event.target.files[0];
         if (!file) return;
@@ -1190,7 +1200,7 @@
             if (hideDialog) hideDialog();
             hideDialog = openMediaAssetsDialog({
               handleInsert: handleInsert,
-              imagesOnly: !!(showOptions && showOptions.imagesOnly && !showOptions.id),
+              imagesOnly: !!(showOptions && showOptions.imagesOnly),
               insertMode: !!(showOptions && showOptions.id),
             });
           },
@@ -1214,7 +1224,7 @@
 
   CMS.registerEditorComponent({
     id: 's3-image',
-    label: 'S3 Image',
+    label: 'Media Image',
     fields: [
       { name: 'asset', label: 'Image', widget: 's3-image' },
     ],
@@ -1250,32 +1260,31 @@
 
   CMS.registerEditorComponent({
     id: 's3-video',
-    label: 'S3 Video',
+    label: 'Video',
+    widget: 's3-video',
     fields: [
-      { name: 'asset', label: 'Video', widget: 's3-video' },
       { name: 'posterKey', label: 'Poster object key', widget: 'string', required: false },
     ],
     pattern: /^::s3-video\{objectKey="([^"]+)"(?: posterKey="([^"]*)")?(?: description="([^"]*)")?\}\n::$/m,
     fromBlock: function (match) {
       return {
-        asset: {
-          provider: 's3',
-          key: match[1],
-          alt: match[3] || '',
-        },
+        provider: 's3',
+        key: match[1],
+        alt: match[3] || '',
+        kind: 'video',
         posterKey: match[2] || '',
       };
     },
     toBlock: function (data) {
-      var asset = valueToJS(data.asset);
+      var asset = valueToJS(data.asset || data);
       if (!asset.key) return '';
       var attrs = 'objectKey="' + escapeAttr(asset.key) + '"';
-      if (data.posterKey) attrs += ' posterKey="' + escapeAttr(data.posterKey) + '"';
+      if (data.posterKey || asset.posterKey) attrs += ' posterKey="' + escapeAttr(data.posterKey || asset.posterKey) + '"';
       if (asset.alt) attrs += ' description="' + escapeAttr(asset.alt) + '"';
       return '::s3-video{' + attrs + '}\n::';
     },
     toPreview: function (data) {
-      var asset = valueToJS(data.asset);
+      var asset = valueToJS(data.asset || data);
       var url = getAssetPreviewUrl(asset);
       return url
         ? '<video src="' + escapeAttr(url) + '" controls style="max-width:100%;"></video>'
