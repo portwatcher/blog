@@ -33,6 +33,52 @@
     return baseUrl.replace(/\/+$/, '') + '/' + String(value.key).split('/').map(encodeURIComponent).join('/');
   }
 
+  function isRenderableUrl(value) {
+    return /^(?:https?:|blob:|data:)/i.test(value) || value.indexOf('/') === 0;
+  }
+
+  function getAssetPublicUrl(asset) {
+    var value = valueToJS(asset);
+    return value.url || value.publicUrl || getAssetUrl(value);
+  }
+
+  function getAssetPreviewUrl(asset) {
+    var value = valueToJS(asset);
+    var previewUrl = value.previewUrl || getAssetPublicUrl(value);
+    if (previewUrl && isRenderableUrl(previewUrl)) return previewUrl;
+    if (value.path && isRenderableUrl(value.path)) return value.path;
+    return '';
+  }
+
+  function getAssetCopyUrl(asset) {
+    var value = valueToJS(asset);
+    return getAssetPublicUrl(value) || getAssetPreviewUrl(value) || value.key || value.path || '';
+  }
+
+  function getAssetInsertUrl(asset) {
+    var value = valueToJS(asset);
+    return getAssetPublicUrl(value) || value.path || value.key || '';
+  }
+
+  function assetToWidgetValue(asset, fallbackKind) {
+    var value = valueToJS(asset);
+    var kind = getMediaKind(value, fallbackKind);
+    return {
+      provider: 's3',
+      key: value.key || value.objectKey || '',
+      url: value.url || '',
+      previewUrl: value.previewUrl || '',
+      filename: value.filename || value.name || '',
+      name: value.name || value.filename || '',
+      contentType: value.contentType || '',
+      size: value.size,
+      width: value.width,
+      height: value.height,
+      kind: kind,
+      alt: value.alt || '',
+    };
+  }
+
   function getMediaKind(fileOrAsset, fallback) {
     var value = fileOrAsset || {};
     var contentType = value.type || value.contentType || '';
@@ -406,10 +452,13 @@
       ? await readImageDimensions(file)
       : await readVideoDimensions(file);
 
+    var publicUrl = result.publicUrl || getAssetUrl({ key: result.key });
+
     return Object.assign({}, dimensions, {
       provider: 's3',
       key: result.key,
-      url: result.publicUrl || getAssetUrl({ key: result.key }),
+      url: publicUrl,
+      previewUrl: result.previewUrl || publicUrl,
       filename: file.name,
       name: file.name,
       contentType: file.type || '',
@@ -513,9 +562,13 @@
           this.props.onChange(Object.assign({}, existing, dimensions, {
             provider: 's3',
             key: result.key,
+            url: result.publicUrl || getAssetUrl({ key: result.key }),
+            previewUrl: result.previewUrl || result.publicUrl || getAssetUrl({ key: result.key }),
             filename: file.name,
+            name: file.name,
             contentType: file.type || '',
             size: file.size,
+            kind: kind,
           }, backupFields(result.backup)));
           this.setState({
             progress: 100,
@@ -541,6 +594,29 @@
 
       handleClear: function () {
         this.props.onChange(null);
+      },
+
+      handleChooseExisting: function () {
+        var component = this;
+
+        openMediaAssetsDialog({
+          kind: kind,
+          selectLabel: kind === 'image' ? 'Use image' : 'Use video',
+          onSelect: function (asset) {
+            if (!asset.key) {
+              component.setState({ error: 'Selected asset is not an S3 object.' });
+              return;
+            }
+
+            var existing = valueToJS(component.props.value);
+            var nextAsset = assetToWidgetValue(asset, kind);
+
+            component.props.onChange(Object.assign({}, existing, nextAsset, {
+              alt: existing.alt || nextAsset.alt || '',
+            }));
+            component.setState({ error: '' });
+          },
+        });
       },
 
       handleRetryBackup: async function () {
@@ -581,7 +657,7 @@
       },
 
       renderPreview: function (asset) {
-        var url = getAssetUrl(asset);
+        var url = getAssetPreviewUrl(asset);
         if (!url) return null;
 
         if (kind === 'image') {
@@ -627,6 +703,12 @@
             disabled: this.state.uploading,
             onChange: this.handleUpload,
           }),
+          h('button', {
+            type: 'button',
+            disabled: this.state.uploading,
+            onClick: this.handleChooseExisting,
+            style: { marginLeft: '8px' },
+          }, kind === 'image' ? 'Choose existing image' : 'Choose existing video'),
           h('div', { style: { marginTop: '8px', fontSize: '12px', color: '#555', wordBreak: 'break-all' } }, label),
           backupLabel
             ? h('div', {
@@ -673,9 +755,9 @@
   var MediaPreview = createClass({
     render: function () {
       var asset = valueToJS(this.props.value);
-      var url = getAssetUrl(asset);
+      var url = getAssetPreviewUrl(asset);
       if (!url) return h('span', {}, asset.key || '');
-      if (asset.contentType && asset.contentType.indexOf('video/') === 0) {
+      if (getMediaKind(asset) === 'video') {
         return h('video', { src: url, controls: true, style: { maxWidth: '100%' } });
       }
       return h('img', { src: url, alt: asset.alt || '', style: { maxWidth: '100%' } });
@@ -719,6 +801,273 @@
     document.head.appendChild(style);
   }
 
+  function openMediaAssetsDialog(dialogOptions) {
+    var options = dialogOptions || {};
+    var handleInsert = options.handleInsert;
+    var onSelect = options.onSelect;
+    var state = {
+      assets: [],
+      error: '',
+      kind: options.kind || (options.imagesOnly ? 'image' : ''),
+      insertMode: !!options.insertMode,
+      loading: false,
+      query: '',
+      selectedId: '',
+      uploading: false,
+      uploadProgress: 0,
+    };
+    var overlay;
+    var fileInput;
+
+    injectAdminMediaStyles();
+
+    function selectedAsset() {
+      return state.assets.find(function (asset) {
+        return asset.id === state.selectedId;
+      });
+    }
+
+    function filteredAssets() {
+      var query = state.query.trim().toLowerCase();
+      return state.assets.filter(function (asset) {
+        if (state.kind && asset.kind !== state.kind) return false;
+        if (!query) return true;
+        return [
+          asset.name,
+          asset.path,
+          asset.url,
+          asset.key,
+          asset.source,
+          asset.postTitle,
+        ].some(function (value) {
+          return String(value || '').toLowerCase().indexOf(query) !== -1;
+        });
+      });
+    }
+
+    function renderPreview(asset) {
+      var url = escapeAttr(getAssetPreviewUrl(asset));
+      if (asset.kind === 'image' && url) {
+        return '<img src="' + url + '" alt="">';
+      }
+      if (asset.kind === 'video' && url) {
+        return '<video src="' + url + '" muted playsinline preload="metadata"></video>';
+      }
+      return escapeHtml((asset.kind || 'file').toUpperCase());
+    }
+
+    function emptyMessage() {
+      if (state.kind === 'image') return 'No images found. Upload an image here or paste/drop one in a post.';
+      if (state.kind === 'video') return 'No videos found. Upload a video here or paste/drop one in a post.';
+      return 'No media assets found. Paste, drop, or upload an image/video in a post to add one.';
+    }
+
+    function renderGrid() {
+      if (state.loading) {
+        return '<div class="blog-cms-media-empty">Loading media assets...</div>';
+      }
+      if (state.error) {
+        return '<div class="blog-cms-media-empty"><span class="blog-cms-media-error">' + escapeHtml(state.error) + '</span></div>';
+      }
+
+      var assets = filteredAssets();
+      if (!assets.length) {
+        return '<div class="blog-cms-media-empty">' + escapeHtml(emptyMessage()) + '</div>';
+      }
+
+      return '<div class="blog-cms-media-grid">' + assets.map(function (asset) {
+        var source = asset.postTitle
+          ? asset.source + ': ' + asset.postTitle
+          : asset.source || asset.path || asset.url || '';
+        return [
+          '<button type="button" class="blog-cms-asset-card" data-asset-id="' + escapeAttr(asset.id) + '" data-selected="' + String(asset.id === state.selectedId) + '">',
+          '<span class="blog-cms-asset-preview">' + renderPreview(asset) + '</span>',
+          '<span class="blog-cms-asset-meta">',
+          '<span class="blog-cms-asset-name" title="' + escapeAttr(asset.name || asset.path || asset.url || '') + '">' + escapeHtml(asset.name || asset.path || asset.url || 'Media asset') + '</span>',
+          '<span class="blog-cms-asset-source" title="' + escapeAttr(source) + '">' + escapeHtml(source) + '</span>',
+          '</span>',
+          '</button>',
+        ].join('');
+      }).join('') + '</div>';
+    }
+
+    function uploadAccept() {
+      if (state.kind === 'image') return 'image/*';
+      if (state.kind === 'video') return 'video/*';
+      return 'image/*,video/*';
+    }
+
+    function render() {
+      var selected = selectedAsset();
+      var canUseSelected = !!selected;
+      var canInsert = canUseSelected && (!!onSelect || (state.insertMode && !!handleInsert));
+      var uploadLabel = state.uploading
+        ? 'Uploading ' + state.uploadProgress + '%'
+        : 'Upload';
+      var selectLabel = options.selectLabel || 'Insert selected';
+
+      overlay.innerHTML = [
+        '<div class="blog-cms-media-dialog" role="dialog" aria-modal="true" aria-label="Media assets">',
+        '<div class="blog-cms-media-header">',
+        '<h2>Media assets</h2>',
+        '<button type="button" class="blog-cms-media-close" data-action="close" aria-label="Close">×</button>',
+        '</div>',
+        '<div class="blog-cms-media-tools">',
+        '<input class="blog-cms-media-search" type="search" placeholder="Search by file, path, or post..." value="' + escapeAttr(state.query) + '">',
+        '<button type="button" class="blog-cms-media-button secondary" data-action="copy" ' + (canUseSelected ? '' : 'disabled') + '>Copy URL</button>',
+        '<button type="button" class="blog-cms-media-button secondary" data-action="download" ' + (canUseSelected ? '' : 'disabled') + '>Download</button>',
+        '<button type="button" class="blog-cms-media-button" data-action="insert" ' + (canInsert ? '' : 'disabled') + '>' + escapeHtml(selectLabel) + '</button>',
+        '<button type="button" class="blog-cms-media-button" data-action="upload" ' + (state.uploading ? 'disabled' : '') + '>' + escapeHtml(uploadLabel) + '</button>',
+        '</div>',
+        '<div class="blog-cms-media-body">' + renderGrid() + '</div>',
+        '<input class="blog-cms-media-file" type="file" accept="' + escapeAttr(uploadAccept()) + '" multiple hidden>',
+        '</div>',
+      ].join('');
+
+      fileInput = overlay.querySelector('.blog-cms-media-file');
+      overlay.querySelector('.blog-cms-media-search').focus();
+    }
+
+    async function loadAssets() {
+      state.loading = true;
+      state.error = '';
+      render();
+
+      try {
+        var url = '/api/cms/media/assets' + (state.kind ? '?kind=' + encodeURIComponent(state.kind) : '');
+        var payload = await cmsGetJson(url);
+        state.assets = Array.isArray(payload.assets) ? payload.assets : [];
+        state.selectedId = state.assets[0] ? state.assets[0].id : '';
+      } catch (error) {
+        state.error = error && error.message ? error.message : String(error);
+      } finally {
+        state.loading = false;
+        render();
+      }
+    }
+
+    function hide() {
+      if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      overlay = null;
+    }
+
+    async function copySelected() {
+      var asset = selectedAsset();
+      if (!asset) return;
+
+      var url = getAssetCopyUrl(asset);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        window.prompt('Copy media URL', url);
+      }
+    }
+
+    function downloadSelected() {
+      var asset = selectedAsset();
+      var url = asset && (getAssetPreviewUrl(asset) || getAssetPublicUrl(asset));
+      if (!asset || !url) return;
+
+      var link = document.createElement('a');
+      link.href = url;
+      link.download = asset.name || '';
+      link.target = '_blank';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    function insertSelected() {
+      var asset = selectedAsset();
+      if (!asset) return;
+
+      if (onSelect) {
+        onSelect(asset);
+      } else if (handleInsert) {
+        handleInsert(getAssetInsertUrl(asset));
+      }
+
+      hide();
+    }
+
+    async function uploadLibraryFiles(files) {
+      var mediaFiles = fileListToArray(files).filter(function (file) {
+        var kind = getMediaKind(file);
+        return kind !== 'file' && (!state.kind || kind === state.kind);
+      });
+      if (!mediaFiles.length) return;
+
+      state.uploading = true;
+      state.uploadProgress = 0;
+      render();
+
+      try {
+        for (var index = 0; index < mediaFiles.length; index += 1) {
+          var asset = await uploadFileToAsset(mediaFiles[index], function (progress) {
+            state.uploadProgress = progress;
+            render();
+          });
+          state.assets.unshift(Object.assign({}, asset, {
+            id: 's3:' + asset.key,
+            path: asset.key,
+            source: 'Uploaded this session',
+          }));
+          state.selectedId = 's3:' + asset.key;
+        }
+      } catch (error) {
+        state.error = error && error.message ? error.message : String(error);
+      } finally {
+        state.uploading = false;
+        state.uploadProgress = 0;
+        render();
+      }
+    }
+
+    overlay = document.createElement('div');
+    overlay.className = 'blog-cms-media-library';
+    document.body.appendChild(overlay);
+    render();
+    loadAssets();
+
+    overlay.addEventListener('click', function (event) {
+      var actionTarget = event.target.closest && event.target.closest('[data-action]');
+      var assetTarget = event.target.closest && event.target.closest('[data-asset-id]');
+
+      if (event.target === overlay || (actionTarget && actionTarget.dataset.action === 'close')) {
+        hide();
+        return;
+      }
+      if (assetTarget) {
+        state.selectedId = assetTarget.dataset.assetId;
+        render();
+        return;
+      }
+      if (!actionTarget) return;
+
+      if (actionTarget.dataset.action === 'copy') copySelected();
+      if (actionTarget.dataset.action === 'download') downloadSelected();
+      if (actionTarget.dataset.action === 'insert') insertSelected();
+      if (actionTarget.dataset.action === 'upload') fileInput.click();
+    });
+
+    overlay.addEventListener('input', function (event) {
+      if (event.target.classList.contains('blog-cms-media-search')) {
+        state.query = event.target.value;
+        render();
+      }
+    });
+
+    overlay.addEventListener('change', function (event) {
+      if (event.target.classList.contains('blog-cms-media-file')) {
+        uploadLibraryFiles(event.target.files).finally(function () {
+          event.target.value = '';
+        });
+      }
+    });
+
+    return hide;
+  }
+
   function registerPostMediaLibrary() {
     if (!CMS.registerMediaLibrary) return;
 
@@ -726,251 +1075,21 @@
       name: 'blog-media-assets',
       init: async function (options) {
         var handleInsert = options && options.handleInsert;
-        var state = {
-          assets: [],
-          error: '',
-          imagesOnly: false,
-          insertMode: false,
-          loading: false,
-          query: '',
-          selectedId: '',
-          uploading: false,
-          uploadProgress: 0,
-        };
-        var overlay;
-        var fileInput;
-
-        function selectedAsset() {
-          return state.assets.find(function (asset) {
-            return asset.id === state.selectedId;
-          });
-        }
-
-        function filteredAssets() {
-          var query = state.query.trim().toLowerCase();
-          return state.assets.filter(function (asset) {
-            if (state.imagesOnly && asset.kind !== 'image') return false;
-            if (!query) return true;
-            return [
-              asset.name,
-              asset.path,
-              asset.url,
-              asset.key,
-              asset.source,
-              asset.postTitle,
-            ].some(function (value) {
-              return String(value || '').toLowerCase().indexOf(query) !== -1;
-            });
-          });
-        }
-
-        function renderPreview(asset) {
-          var url = escapeAttr(asset.url || asset.path || '');
-          if (asset.kind === 'image' && url) {
-            return '<img src="' + url + '" alt="">';
-          }
-          if (asset.kind === 'video' && url) {
-            return '<video src="' + url + '" muted playsinline preload="metadata"></video>';
-          }
-          return escapeHtml((asset.kind || 'file').toUpperCase());
-        }
-
-        function renderGrid() {
-          if (state.loading) {
-            return '<div class="blog-cms-media-empty">Loading media assets...</div>';
-          }
-          if (state.error) {
-            return '<div class="blog-cms-media-empty"><span class="blog-cms-media-error">' + escapeHtml(state.error) + '</span></div>';
-          }
-
-          var assets = filteredAssets();
-          if (!assets.length) {
-            return '<div class="blog-cms-media-empty">No media assets found. Paste, drop, or upload an image/video in a post to add one.</div>';
-          }
-
-          return '<div class="blog-cms-media-grid">' + assets.map(function (asset) {
-            var source = asset.postTitle
-              ? asset.source + ': ' + asset.postTitle
-              : asset.source || asset.path || asset.url || '';
-            return [
-              '<button type="button" class="blog-cms-asset-card" data-asset-id="' + escapeAttr(asset.id) + '" data-selected="' + String(asset.id === state.selectedId) + '">',
-              '<span class="blog-cms-asset-preview">' + renderPreview(asset) + '</span>',
-              '<span class="blog-cms-asset-meta">',
-              '<span class="blog-cms-asset-name" title="' + escapeAttr(asset.name || asset.path || asset.url || '') + '">' + escapeHtml(asset.name || asset.path || asset.url || 'Media asset') + '</span>',
-              '<span class="blog-cms-asset-source" title="' + escapeAttr(source) + '">' + escapeHtml(source) + '</span>',
-              '</span>',
-              '</button>',
-            ].join('');
-          }).join('') + '</div>';
-        }
-
-        function render() {
-          var selected = selectedAsset();
-          var canUseSelected = !!selected;
-          var uploadLabel = state.uploading
-            ? 'Uploading ' + state.uploadProgress + '%'
-            : 'Upload';
-
-          overlay.innerHTML = [
-            '<div class="blog-cms-media-dialog" role="dialog" aria-modal="true" aria-label="Media assets">',
-            '<div class="blog-cms-media-header">',
-            '<h2>Media assets</h2>',
-            '<button type="button" class="blog-cms-media-close" data-action="close" aria-label="Close">×</button>',
-            '</div>',
-            '<div class="blog-cms-media-tools">',
-            '<input class="blog-cms-media-search" type="search" placeholder="Search by file, path, or post..." value="' + escapeAttr(state.query) + '">',
-            '<button type="button" class="blog-cms-media-button secondary" data-action="copy" ' + (canUseSelected ? '' : 'disabled') + '>Copy URL</button>',
-            '<button type="button" class="blog-cms-media-button secondary" data-action="download" ' + (canUseSelected ? '' : 'disabled') + '>Download</button>',
-            '<button type="button" class="blog-cms-media-button" data-action="insert" ' + (state.insertMode && canUseSelected ? '' : 'disabled') + '>Insert selected</button>',
-            '<button type="button" class="blog-cms-media-button" data-action="upload" ' + (state.uploading ? 'disabled' : '') + '>' + escapeHtml(uploadLabel) + '</button>',
-            '</div>',
-            '<div class="blog-cms-media-body">' + renderGrid() + '</div>',
-            '<input class="blog-cms-media-file" type="file" accept="image/*,video/*" multiple hidden>',
-            '</div>',
-          ].join('');
-
-          fileInput = overlay.querySelector('.blog-cms-media-file');
-          overlay.querySelector('.blog-cms-media-search').focus();
-        }
-
-        async function loadAssets() {
-          state.loading = true;
-          state.error = '';
-          render();
-
-          try {
-            var url = '/api/cms/media/assets' + (state.imagesOnly ? '?kind=image' : '');
-            var payload = await cmsGetJson(url);
-            state.assets = Array.isArray(payload.assets) ? payload.assets : [];
-            state.selectedId = state.assets[0] ? state.assets[0].id : '';
-          } catch (error) {
-            state.error = error && error.message ? error.message : String(error);
-          } finally {
-            state.loading = false;
-            render();
-          }
-        }
-
-        function hide() {
-          if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
-          overlay = null;
-        }
-
-        async function copySelected() {
-          var asset = selectedAsset();
-          if (!asset) return;
-
-          var url = asset.url || asset.path || asset.key || '';
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText(url);
-          } else {
-            window.prompt('Copy media URL', url);
-          }
-        }
-
-        function downloadSelected() {
-          var asset = selectedAsset();
-          if (!asset || !asset.url) return;
-
-          var link = document.createElement('a');
-          link.href = asset.url;
-          link.download = asset.name || '';
-          link.target = '_blank';
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-        }
-
-        function insertSelected() {
-          var asset = selectedAsset();
-          if (!asset || !handleInsert) return;
-          handleInsert(asset.url || asset.path || asset.key || '');
-          hide();
-        }
-
-        async function uploadLibraryFiles(files) {
-          var mediaFiles = fileListToArray(files).filter(function (file) {
-            return getMediaKind(file) !== 'file';
-          });
-          if (!mediaFiles.length) return;
-
-          state.uploading = true;
-          state.uploadProgress = 0;
-          render();
-
-          try {
-            for (var index = 0; index < mediaFiles.length; index += 1) {
-              var asset = await uploadFileToAsset(mediaFiles[index], function (progress) {
-                state.uploadProgress = progress;
-                render();
-              });
-              state.assets.unshift(Object.assign({}, asset, {
-                id: 's3:' + asset.key,
-                path: asset.url || asset.key,
-                source: 'Uploaded this session',
-              }));
-              state.selectedId = 's3:' + asset.key;
-            }
-          } catch (error) {
-            state.error = error && error.message ? error.message : String(error);
-          } finally {
-            state.uploading = false;
-            state.uploadProgress = 0;
-            render();
-          }
-        }
+        var hideDialog = null;
 
         return {
           show: function (showOptions) {
-            injectAdminMediaStyles();
-            state.imagesOnly = !!(showOptions && showOptions.imagesOnly);
-            state.insertMode = !!(showOptions && showOptions.id);
-            state.query = '';
-            state.selectedId = '';
-
-            overlay = document.createElement('div');
-            overlay.className = 'blog-cms-media-library';
-            document.body.appendChild(overlay);
-            render();
-            loadAssets();
-
-            overlay.addEventListener('click', function (event) {
-              var actionTarget = event.target.closest && event.target.closest('[data-action]');
-              var assetTarget = event.target.closest && event.target.closest('[data-asset-id]');
-
-              if (event.target === overlay || (actionTarget && actionTarget.dataset.action === 'close')) {
-                hide();
-                return;
-              }
-              if (assetTarget) {
-                state.selectedId = assetTarget.dataset.assetId;
-                render();
-                return;
-              }
-              if (!actionTarget) return;
-
-              if (actionTarget.dataset.action === 'copy') copySelected();
-              if (actionTarget.dataset.action === 'download') downloadSelected();
-              if (actionTarget.dataset.action === 'insert') insertSelected();
-              if (actionTarget.dataset.action === 'upload') fileInput.click();
-            });
-
-            overlay.addEventListener('input', function (event) {
-              if (event.target.classList.contains('blog-cms-media-search')) {
-                state.query = event.target.value;
-                render();
-              }
-            });
-
-            overlay.addEventListener('change', function (event) {
-              if (event.target.classList.contains('blog-cms-media-file')) {
-                uploadLibraryFiles(event.target.files).finally(function () {
-                  event.target.value = '';
-                });
-              }
+            if (hideDialog) hideDialog();
+            hideDialog = openMediaAssetsDialog({
+              handleInsert: handleInsert,
+              imagesOnly: !!(showOptions && showOptions.imagesOnly),
+              insertMode: !!(showOptions && showOptions.id),
             });
           },
-          hide: hide,
+          hide: function () {
+            if (hideDialog) hideDialog();
+            hideDialog = null;
+          },
           enableStandalone: function () {
             return true;
           },
@@ -1014,7 +1133,7 @@
     },
     toPreview: function (data) {
       var asset = valueToJS(data.asset);
-      var url = getAssetUrl(asset);
+      var url = getAssetPreviewUrl(asset);
       return url
         ? '<img src="' + escapeAttr(url) + '" alt="' + escapeAttr(asset.alt || '') + '" style="max-width:100%;">'
         : '<code>' + escapeHtml(asset.key || '') + '</code>';
@@ -1049,7 +1168,7 @@
     },
     toPreview: function (data) {
       var asset = valueToJS(data.asset);
-      var url = getAssetUrl(asset);
+      var url = getAssetPreviewUrl(asset);
       return url
         ? '<video src="' + escapeAttr(url) + '" controls style="max-width:100%;"></video>'
         : '<code>' + escapeHtml(asset.key || '') + '</code>';

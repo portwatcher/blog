@@ -1,9 +1,12 @@
 import { readdir, stat } from 'node:fs/promises'
 import { basename, extname, join, relative, sep } from 'node:path'
+import { ListObjectsV2Command } from '@aws-sdk/client-s3'
 import { getRuntimeContent } from '../../../utils/runtime-content'
 import {
   assertCmsMediaLibraryAuthorized,
+  createS3Client,
   getPublicMediaUrl,
+  getSignedMediaReadUrl,
   getS3MediaConfig,
 } from '../../../utils/s3-media'
 
@@ -14,6 +17,7 @@ interface CmsMediaAsset {
   name: string
   path: string
   url: string
+  previewUrl?: string
   key?: string
   kind: MediaKind
   contentType?: string
@@ -117,9 +121,17 @@ const addAsset = (assets: Map<string, CmsMediaAsset>, asset: Omit<CmsMediaAsset,
     return
   }
 
-  if (!existing.postTitle && asset.postTitle) {
-    assets.set(id, { ...existing, source: asset.source, postTitle: asset.postTitle, postPath: asset.postPath })
-  }
+  assets.set(id, {
+    ...existing,
+    url: existing.url || asset.url,
+    path: existing.path || asset.path,
+    previewUrl: existing.previewUrl || asset.previewUrl,
+    contentType: existing.contentType || asset.contentType,
+    size: existing.size ?? asset.size,
+    source: !existing.postTitle && asset.postTitle ? asset.source : existing.source,
+    postTitle: existing.postTitle || asset.postTitle,
+    postPath: existing.postPath || asset.postPath,
+  })
 }
 
 const addUrlAsset = (
@@ -305,6 +317,74 @@ const addStaticPublicAssets = async (assets: Map<string, CmsMediaAsset>) => {
   }
 }
 
+const getManagedS3Prefix = (mediaConfig: ReturnType<typeof getS3MediaConfig>) => {
+  const prefix = mediaConfig.keyPrefix.replace(/^\/+|\/+$/g, '')
+
+  return prefix ? `${prefix}/` : ''
+}
+
+const createS3PreviewUrl = async (
+  key: string,
+  mediaConfig: ReturnType<typeof getS3MediaConfig>,
+  publicUrl: string,
+) => {
+  try {
+    return await getSignedMediaReadUrl(key, mediaConfig)
+  } catch (_error) {
+    return publicUrl
+  }
+}
+
+const addManagedS3Assets = async (
+  assets: Map<string, CmsMediaAsset>,
+  mediaConfig: ReturnType<typeof getS3MediaConfig>,
+) => {
+  if (!mediaConfig.bucket) return
+
+  const client = createS3Client(mediaConfig)
+  const prefix = getManagedS3Prefix(mediaConfig)
+  let continuationToken: string | undefined
+
+  do {
+    const response = await client.send(new ListObjectsV2Command({
+      Bucket: mediaConfig.bucket,
+      Prefix: prefix,
+      ContinuationToken: continuationToken,
+      MaxKeys: 1000,
+    }))
+
+    const pageAssets = await Promise.all((response.Contents || []).map(async (object) => {
+      const key = String(object.Key || '')
+      if (!key || key.endsWith('/')) return null
+
+      const kind = getKindFromName(key)
+      if (kind === 'file') return null
+
+      const publicUrl = getPublicMediaUrl(key, mediaConfig)
+      const previewUrl = await createS3PreviewUrl(key, mediaConfig, publicUrl)
+
+      return {
+        id: `s3:${key}`,
+        name: basenameFromPath(key),
+        path: key,
+        url: publicUrl,
+        previewUrl,
+        key,
+        kind,
+        contentType: getContentTypeFromName(key),
+        size: typeof object.Size === 'number' ? object.Size : undefined,
+        source: 'S3 bucket',
+      } satisfies Omit<CmsMediaAsset, 'id'> & { id: string }
+    }))
+
+    for (const asset of pageAssets) {
+      if (asset) addAsset(assets, asset)
+    }
+
+    continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined
+  } while (continuationToken)
+}
+
 export default defineEventHandler(async (event) => {
   event.node.res.setHeader('cache-control', 'no-store')
   event.node.res.setHeader('pragma', 'no-cache')
@@ -331,6 +411,7 @@ export default defineEventHandler(async (event) => {
     collectNodeAssets(assets, (doc as any).body, context, mediaConfig)
   }
 
+  await addManagedS3Assets(assets, mediaConfig)
   await addStaticPublicAssets(assets)
 
   const filteredAssets = Array.from(assets.values())

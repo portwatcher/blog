@@ -2,6 +2,7 @@ import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
+  GetObjectCommand,
   S3Client,
   UploadPartCommand,
   type CompletedPart,
@@ -201,6 +202,20 @@ export const getPublicMediaUrl = (key: string, config = getS3MediaConfig()) => {
   return `${config.mediaBaseUrl.replace(/\/+$/, '')}/${key.split('/').map(encodeURIComponent).join('/')}`
 }
 
+export const getSignedMediaReadUrl = async (
+  key: string,
+  config = getS3MediaConfig(),
+  expiresIn = 3600
+) => {
+  assertS3MediaConfigured(config)
+  assertManagedMediaKey(key, config)
+
+  return getSignedUrl(createS3Client(config), new GetObjectCommand({
+    Bucket: config.bucket,
+    Key: key,
+  }), { expiresIn })
+}
+
 export const createMultipartUpload = async (input: {
   filename: string
   contentType: string
@@ -329,6 +344,7 @@ export const completeMultipartUpload = async (input: {
     bucket: config.bucket,
     location: response.Location,
     publicUrl: getPublicMediaUrl(input.key, config),
+    previewUrl: await getSignedMediaReadUrl(input.key, config).catch(() => getPublicMediaUrl(input.key, config)),
   }
 }
 
