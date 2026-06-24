@@ -33,16 +33,10 @@ const props = withDefaults(defineProps<{
   description: '',
 })
 
-const config = useRuntimeConfig()
-
-const encodeObjectKey = (key: string) =>
-  key.split('/').map(encodeURIComponent).join('/')
-
 const mediaUrl = (key: string) => {
-  const baseUrl = String(config.public.mediaBaseUrl || '').replace(/\/+$/, '')
   const normalizedKey = key.trim()
 
-  return baseUrl && normalizedKey ? `${baseUrl}/${encodeObjectKey(normalizedKey)}` : ''
+  return normalizedKey ? `/api/cms/media/object?key=${encodeURIComponent(normalizedKey)}` : ''
 }
 
 const src = computed(() => mediaUrl(props.objectKey))

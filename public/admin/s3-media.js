@@ -47,12 +47,19 @@
     return baseUrl.replace(/\/+$/, '') + '/' + String(value.key).split('/').map(encodeURIComponent).join('/');
   }
 
+  function getAssetProxyUrl(asset) {
+    var value = valueToJS(asset);
+    if (!value.key) return '';
+    return '/api/cms/media/object?key=' + encodeURIComponent(value.key);
+  }
+
   function isRenderableUrl(value) {
     return /^(?:https?:|blob:|data:)/i.test(value) || value.indexOf('/') === 0;
   }
 
   function getAssetPublicUrl(asset) {
     var value = valueToJS(asset);
+    if (value.key) return getAssetProxyUrl(value) || value.url || value.publicUrl || getAssetUrl(value);
     return value.url || value.publicUrl || getAssetUrl(value);
   }
 
@@ -81,7 +88,7 @@
     return {
       provider: 's3',
       key: value.key || value.objectKey || '',
-      url: value.url || '',
+      url: getAssetPublicUrl(value) || value.url || '',
       previewUrl: value.previewUrl || '',
       filename: value.filename || displayName,
       name: displayName,

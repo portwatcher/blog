@@ -28,11 +28,6 @@ const props = withDefaults(defineProps<{
   height: undefined,
 })
 
-const config = useRuntimeConfig()
-
-const encodeObjectKey = (key: string) =>
-  key.split('/').map(encodeURIComponent).join('/')
-
 const normalizeDimension = (value: string | number | undefined) => {
   const number = Number(value)
 
@@ -40,10 +35,9 @@ const normalizeDimension = (value: string | number | undefined) => {
 }
 
 const src = computed(() => {
-  const baseUrl = String(config.public.mediaBaseUrl || '').replace(/\/+$/, '')
   const key = props.objectKey.trim()
 
-  return baseUrl && key ? `${baseUrl}/${encodeObjectKey(key)}` : ''
+  return key ? `/api/cms/media/object?key=${encodeURIComponent(key)}` : ''
 })
 const normalizedWidth = computed(() => normalizeDimension(props.width))
 const normalizedHeight = computed(() => normalizeDimension(props.height))
