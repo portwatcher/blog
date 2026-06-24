@@ -58,6 +58,12 @@
 </template>
 
 <script setup lang="ts">
+// Language tabs only change the query string, so key the page by fullPath to
+// keep Nuxt's page-loading lifecycle aligned with the article fetch.
+definePageMeta({
+  key: (route) => route.fullPath,
+})
+
 const route = useRoute()
 const config = useRuntimeConfig()
 const password = ref<string | null>(null)
@@ -197,16 +203,6 @@ const languageTabs = computed(() =>
 onMounted(() => {
   void applyMarkdownImageLayout()
 })
-
-watch(
-  () => [String(route.params.title || ''), String(route.query.lang || '')],
-  () => {
-    void (async () => {
-      await loadArticle()
-      await applyMarkdownImageLayout()
-    })()
-  },
-)
 
 useSeoMeta({
   title: () => article.value?.title,
