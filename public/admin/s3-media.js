@@ -63,13 +63,14 @@
   function assetToWidgetValue(asset, fallbackKind) {
     var value = valueToJS(asset);
     var kind = getMediaKind(value, fallbackKind);
+    var displayName = getAssetDisplayName(value);
     return {
       provider: 's3',
       key: value.key || value.objectKey || '',
       url: value.url || '',
       previewUrl: value.previewUrl || '',
-      filename: value.filename || value.name || '',
-      name: value.name || value.filename || '',
+      filename: value.filename || displayName,
+      name: displayName,
       contentType: value.contentType || '',
       size: value.size,
       width: value.width,
@@ -90,6 +91,90 @@
     if (/\.(m4v|mov|mp4|mpeg|mpg|ogg|ogv|webm)$/i.test(name)) return 'video';
 
     return fallback || 'file';
+  }
+
+  function basenameFromPath(value) {
+    var clean = String(value || '').split(/[?#]/)[0];
+    var parts = clean.split('/');
+    var name = parts[parts.length - 1] || clean;
+
+    try {
+      return decodeURIComponent(name);
+    } catch (_error) {
+      return name;
+    }
+  }
+
+  function stripManagedUploadPrefix(value) {
+    return String(value || '').replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-(.+)$/i, '$1');
+  }
+
+  function getAssetDisplayName(asset) {
+    var value = valueToJS(asset);
+    return value.name || value.filename || stripManagedUploadPrefix(basenameFromPath(value.key || value.path || value.url || ''));
+  }
+
+  function getAssetExtension(asset, fallback) {
+    var name = getAssetDisplayName(asset) || basenameFromPath(valueToJS(asset).key || '');
+    var match = String(name).match(/\.([a-z0-9]{1,12})$/i);
+    return match ? match[1].toUpperCase() : fallback;
+  }
+
+  function isExactFilenameQuery(query) {
+    return /^[^/\\]+\.[a-z0-9]{1,12}$/i.test(query);
+  }
+
+  function getAssetSearchValues(asset) {
+    var value = valueToJS(asset);
+    var values = [
+      getAssetDisplayName(value),
+      value.filename,
+      stripManagedUploadPrefix(basenameFromPath(value.key || '')),
+      value.path,
+      value.url,
+      value.key,
+      value.source,
+      value.postTitle,
+    ];
+
+    return values
+      .map(function (item) { return String(item || '').toLowerCase(); })
+      .filter(Boolean)
+      .filter(function (item, index, list) { return list.indexOf(item) === index; });
+  }
+
+  function assetMatchesQuery(asset, query) {
+    if (!query) return true;
+
+    var search = query.trim().toLowerCase();
+    var values = getAssetSearchValues(asset);
+
+    if (!isExactFilenameQuery(search)) {
+      return values.some(function (value) {
+        return value.indexOf(search) !== -1;
+      });
+    }
+
+    return values.some(function (value) {
+      var basename = stripManagedUploadPrefix(basenameFromPath(value));
+      return value === search || basename === search || value.endsWith('/' + search);
+    });
+  }
+
+  function assetSearchRank(asset, query) {
+    if (!query) return 0;
+
+    var search = query.trim().toLowerCase();
+    var value = valueToJS(asset);
+    var name = String(getAssetDisplayName(value) || '').toLowerCase();
+    var keyName = stripManagedUploadPrefix(basenameFromPath(value.key || '').toLowerCase());
+    var values = getAssetSearchValues(value);
+
+    if (name === search) return 0;
+    if (keyName === search) return 1;
+    if (name.indexOf(search) === 0) return 2;
+    if (values.some(function (item) { return item.indexOf(search) !== -1; })) return 3;
+    return 4;
   }
 
   function escapeHtml(value) {
@@ -789,8 +874,15 @@
       '.blog-cms-media-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;}',
       '.blog-cms-asset-card{border:1px solid #e2e6ec;background:#fff;border-radius:6px;padding:0;text-align:left;cursor:pointer;overflow:hidden;min-width:0;}',
       '.blog-cms-asset-card[data-selected="true"]{border-color:#2f6fad;box-shadow:0 0 0 2px rgba(47,111,173,.24);}',
-      '.blog-cms-asset-preview{aspect-ratio:16/10;background:#f1f3f6;display:flex;align-items:center;justify-content:center;color:#697483;font:700 13px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}',
+      '.blog-cms-asset-preview{position:relative;aspect-ratio:16/10;background:#f1f3f6;display:flex;align-items:center;justify-content:center;color:#697483;font:700 13px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;}',
       '.blog-cms-asset-preview img,.blog-cms-asset-preview video{width:100%;height:100%;object-fit:cover;display:block;}',
+      '.blog-cms-image-preview,.blog-cms-video-preview{position:relative;display:block;width:100%;height:100%;background:#edf1f5;}',
+      '.blog-cms-image-preview[data-broken="true"] img,.blog-cms-video-preview[data-broken="true"] video{display:none;}',
+      '.blog-cms-image-preview[data-broken="true"]::before,.blog-cms-video-preview[data-broken="true"]::before{content:attr(data-label);position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#647181;font:800 13px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}',
+      '.blog-cms-video-preview::after{content:"";position:absolute;left:50%;top:50%;width:44px;height:44px;border-radius:999px;background:rgba(20,28,33,.72);transform:translate(-50%,-50%);box-shadow:0 8px 24px rgba(15,23,42,.18);}',
+      '.blog-cms-video-preview[data-broken="true"]::after{display:none;}',
+      '.blog-cms-video-play{position:absolute;left:50%;top:50%;z-index:1;width:0;height:0;border-top:10px solid transparent;border-bottom:10px solid transparent;border-left:15px solid #fff;transform:translate(-38%,-50%);pointer-events:none;}',
+      '.blog-cms-video-badge{position:absolute;right:8px;bottom:8px;z-index:1;border-radius:4px;background:rgba(20,28,33,.82);color:#fff;padding:3px 6px;font:800 10px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}',
       '.blog-cms-asset-meta{padding:10px 11px;display:grid;gap:5px;}',
       '.blog-cms-asset-name{font:700 13px/1.25 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#2f3b3f;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
       '.blog-cms-asset-source{font:12px/1.3 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#6f7987;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
@@ -829,29 +921,29 @@
 
     function filteredAssets() {
       var query = state.query.trim().toLowerCase();
-      return state.assets.filter(function (asset) {
+      var assets = state.assets.filter(function (asset) {
         if (state.kind && asset.kind !== state.kind) return false;
-        if (!query) return true;
-        return [
-          asset.name,
-          asset.path,
-          asset.url,
-          asset.key,
-          asset.source,
-          asset.postTitle,
-        ].some(function (value) {
-          return String(value || '').toLowerCase().indexOf(query) !== -1;
-        });
+        return assetMatchesQuery(asset, query);
       });
+
+      if (query) {
+        assets.sort(function (left, right) {
+          return assetSearchRank(left, query) - assetSearchRank(right, query) ||
+            getAssetDisplayName(left).localeCompare(getAssetDisplayName(right));
+        });
+      }
+
+      return assets;
     }
 
     function renderPreview(asset) {
       var url = escapeAttr(getAssetPreviewUrl(asset));
       if (asset.kind === 'image' && url) {
-        return '<img src="' + url + '" alt="">';
+        return '<span class="blog-cms-image-preview" data-label="' + escapeAttr(getAssetExtension(asset, 'IMAGE')) + '"><img src="' + url + '" alt="" loading="lazy" onload="this.parentNode.dataset.broken=&quot;false&quot;" onerror="this.parentNode.dataset.broken=&quot;true&quot;"></span>';
       }
       if (asset.kind === 'video' && url) {
-        return '<video src="' + url + '" muted playsinline preload="metadata"></video>';
+        var extension = getAssetExtension(asset, 'VIDEO');
+        return '<span class="blog-cms-video-preview" data-label="' + escapeAttr(extension) + '"><video src="' + url + '" muted playsinline preload="metadata" onerror="this.parentNode.dataset.broken=&quot;true&quot;"></video><span class="blog-cms-video-play"></span><span class="blog-cms-video-badge">' + escapeHtml(extension) + '</span></span>';
       }
       return escapeHtml((asset.kind || 'file').toUpperCase());
     }
@@ -876,6 +968,7 @@
       }
 
       return '<div class="blog-cms-media-grid">' + assets.map(function (asset) {
+        var displayName = getAssetDisplayName(asset);
         var source = asset.postTitle
           ? asset.source + ': ' + asset.postTitle
           : asset.source || asset.path || asset.url || '';
@@ -883,7 +976,7 @@
           '<button type="button" class="blog-cms-asset-card" data-asset-id="' + escapeAttr(asset.id) + '" data-selected="' + String(asset.id === state.selectedId) + '">',
           '<span class="blog-cms-asset-preview">' + renderPreview(asset) + '</span>',
           '<span class="blog-cms-asset-meta">',
-          '<span class="blog-cms-asset-name" title="' + escapeAttr(asset.name || asset.path || asset.url || '') + '">' + escapeHtml(asset.name || asset.path || asset.url || 'Media asset') + '</span>',
+          '<span class="blog-cms-asset-name" title="' + escapeAttr(displayName || asset.path || asset.url || '') + '">' + escapeHtml(displayName || asset.path || asset.url || 'Media asset') + '</span>',
           '<span class="blog-cms-asset-source" title="' + escapeAttr(source) + '">' + escapeHtml(source) + '</span>',
           '</span>',
           '</button>',
@@ -905,6 +998,11 @@
         ? 'Uploading ' + state.uploadProgress + '%'
         : 'Upload';
       var selectLabel = options.selectLabel || 'Insert selected';
+      var previousSearch = overlay.querySelector('.blog-cms-media-search');
+      var restoreSearchFocus = previousSearch && document.activeElement === previousSearch;
+      var selectionStart = restoreSearchFocus ? previousSearch.selectionStart : null;
+      var selectionEnd = restoreSearchFocus ? previousSearch.selectionEnd : null;
+      var selectionDirection = restoreSearchFocus ? previousSearch.selectionDirection : 'none';
 
       overlay.innerHTML = [
         '<div class="blog-cms-media-dialog" role="dialog" aria-modal="true" aria-label="Media assets">',
@@ -925,7 +1023,15 @@
       ].join('');
 
       fileInput = overlay.querySelector('.blog-cms-media-file');
-      overlay.querySelector('.blog-cms-media-search').focus();
+      var searchInput = overlay.querySelector('.blog-cms-media-search');
+      if (searchInput && restoreSearchFocus) {
+        searchInput.focus();
+        if (selectionStart !== null && searchInput.setSelectionRange) {
+          searchInput.setSelectionRange(selectionStart, selectionEnd, selectionDirection);
+        }
+      } else if (searchInput && !previousSearch) {
+        searchInput.focus();
+      }
     }
 
     async function loadAssets() {
@@ -984,7 +1090,9 @@
       if (onSelect) {
         onSelect(asset);
       } else if (handleInsert) {
-        handleInsert(getAssetInsertUrl(asset));
+        handleInsert(asset.kind === 'video' && asset.key
+          ? withBlockSpacing(makeMdcBlock(assetToWidgetValue(asset, 'video'), 'video'))
+          : getAssetInsertUrl(asset));
       }
 
       hide();
@@ -1082,7 +1190,7 @@
             if (hideDialog) hideDialog();
             hideDialog = openMediaAssetsDialog({
               handleInsert: handleInsert,
-              imagesOnly: !!(showOptions && showOptions.imagesOnly),
+              imagesOnly: !!(showOptions && showOptions.imagesOnly && !showOptions.id),
               insertMode: !!(showOptions && showOptions.id),
             });
           },

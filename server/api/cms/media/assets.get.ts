@@ -1,6 +1,6 @@
 import { readdir, stat } from 'node:fs/promises'
 import { basename, extname, join, relative, sep } from 'node:path'
-import { ListObjectsV2Command } from '@aws-sdk/client-s3'
+import { HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
 import { getRuntimeContent } from '../../../utils/runtime-content'
 import {
   assertCmsMediaLibraryAuthorized,
@@ -99,6 +99,30 @@ const basenameFromPath = (value: string) => {
     return name
   }
 }
+
+const stripManagedUploadPrefix = (value: string) =>
+  value.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-(.+)$/i, '$1')
+
+const getMetadataValue = (metadata: Record<string, string> | undefined, names: string[]) => {
+  if (!metadata) return ''
+
+  for (const name of names) {
+    const value = metadata[name] || metadata[name.toLowerCase()]
+    if (value) return value
+  }
+
+  const lowerNames = new Set(names.map((name) => name.toLowerCase()))
+  const entry = Object.entries(metadata).find(([key]) => lowerNames.has(key.toLowerCase()))
+  return entry?.[1] || ''
+}
+
+const getOriginalFilename = (metadata: Record<string, string> | undefined) => {
+  const filename = getMetadataValue(metadata, ['originalFilename', 'original-filename', 'filename']).trim()
+  return filename ? basenameFromPath(filename) : ''
+}
+
+const getManagedAssetName = (key: string, metadata: Record<string, string> | undefined) =>
+  getOriginalFilename(metadata) || stripManagedUploadPrefix(basenameFromPath(key))
 
 const isSkippableUrl = (value: string) =>
   !value ||
@@ -335,6 +359,41 @@ const createS3PreviewUrl = async (
   }
 }
 
+const mapWithConcurrency = async <Input, Output>(
+  values: Input[],
+  concurrency: number,
+  mapper: (value: Input) => Promise<Output>,
+) => {
+  const results = new Array<Output>(values.length)
+  let nextIndex = 0
+
+  const workers = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+    while (nextIndex < values.length) {
+      const index = nextIndex
+      nextIndex += 1
+      results[index] = await mapper(values[index])
+    }
+  })
+
+  await Promise.all(workers)
+  return results
+}
+
+const getS3ObjectHead = async (
+  client: ReturnType<typeof createS3Client>,
+  bucket: string,
+  key: string,
+) => {
+  try {
+    return await client.send(new HeadObjectCommand({
+      Bucket: bucket,
+      Key: key,
+    }))
+  } catch (_error) {
+    return null
+  }
+}
+
 const addManagedS3Assets = async (
   assets: Map<string, CmsMediaAsset>,
   mediaConfig: ReturnType<typeof getS3MediaConfig>,
@@ -353,11 +412,14 @@ const addManagedS3Assets = async (
       MaxKeys: 1000,
     }))
 
-    const pageAssets = await Promise.all((response.Contents || []).map(async (object) => {
+    const pageAssets = await mapWithConcurrency(response.Contents || [], 12, async (object) => {
       const key = String(object.Key || '')
       if (!key || key.endsWith('/')) return null
 
-      const kind = getKindFromName(key)
+      const head = await getS3ObjectHead(client, mediaConfig.bucket, key)
+      const name = getManagedAssetName(key, head?.Metadata)
+      const contentType = String(head?.ContentType || '') || getContentTypeFromName(key)
+      const kind = getKindFromAsset({ contentType, name, key }, getKindFromName(key))
       if (kind === 'file') return null
 
       const publicUrl = getPublicMediaUrl(key, mediaConfig)
@@ -365,17 +427,17 @@ const addManagedS3Assets = async (
 
       return {
         id: `s3:${key}`,
-        name: basenameFromPath(key),
+        name,
         path: key,
         url: publicUrl,
         previewUrl,
         key,
         kind,
-        contentType: getContentTypeFromName(key),
+        contentType,
         size: typeof object.Size === 'number' ? object.Size : undefined,
         source: 'S3 bucket',
       } satisfies Omit<CmsMediaAsset, 'id'> & { id: string }
-    }))
+    })
 
     for (const asset of pageAssets) {
       if (asset) addAsset(assets, asset)
@@ -414,21 +476,48 @@ export default defineEventHandler(async (event) => {
   await addManagedS3Assets(assets, mediaConfig)
   await addStaticPublicAssets(assets)
 
+  const exactFilenameSearch = !!search && /^[^/\\]+\.[a-z0-9]{1,12}$/i.test(search)
+  const assetSearchValues = (asset: CmsMediaAsset) => [
+    asset.name,
+    stripManagedUploadPrefix(basenameFromPath(asset.key || '')),
+    asset.path,
+    asset.url,
+    asset.key,
+    asset.source,
+    asset.postTitle,
+  ].map((value) => String(value || '').toLowerCase()).filter(Boolean)
+
+  const matchesSearch = (asset: CmsMediaAsset) => {
+    if (!search) return true
+
+    const values = assetSearchValues(asset)
+    if (!exactFilenameSearch) {
+      return values.some((value) => value.includes(search))
+    }
+
+    return values.some((value) => {
+      const basename = stripManagedUploadPrefix(basenameFromPath(value))
+      return value === search || basename === search || value.endsWith(`/${search}`)
+    })
+  }
+
+  const searchRank = (asset: CmsMediaAsset) => {
+    if (!search) return 0
+
+    const name = String(asset.name || '').toLowerCase()
+    const values = assetSearchValues(asset)
+    if (name === search) return 0
+    if (stripManagedUploadPrefix(basenameFromPath(asset.key || '').toLowerCase()) === search) return 1
+    if (name.startsWith(search)) return 2
+    if (values.some((value) => value.includes(search))) return 3
+    return 4
+  }
+
   const filteredAssets = Array.from(assets.values())
     .filter((asset) => !kind || asset.kind === kind)
-    .filter((asset) => {
-      if (!search) return true
-
-      return [
-        asset.name,
-        asset.path,
-        asset.url,
-        asset.key,
-        asset.source,
-        asset.postTitle,
-      ].some((value) => String(value || '').toLowerCase().includes(search))
-    })
+    .filter(matchesSearch)
     .sort((left, right) =>
+      searchRank(left) - searchRank(right) ||
       String(left.postTitle || left.source || '').localeCompare(String(right.postTitle || right.source || '')) ||
       left.name.localeCompare(right.name)
     )
