@@ -56,6 +56,7 @@ export const getAdminCmsConfig = (event: H3Event) => {
   }
 
   const cmsConfig: Record<string, unknown> = {
+    load_config_file: false,
     backend,
     media_folder: '_decap-unused-media',
     public_folder: '/_decap-unused-media',

@@ -645,7 +645,9 @@
 
       componentDidMount: function () {
         var component = this;
-        if (kind !== 'video' || !this.props.isEditorComponent || !this.props.isNewEditorComponent) return;
+        var shouldOpenPicker = fieldGet(this.props.field, 'openPickerOnMount', false)
+          || (this.props.isEditorComponent && this.props.isNewEditorComponent);
+        if (kind !== 'video' || !shouldOpenPicker) return;
         if (valueToJS(this.props.value).key) return;
 
         window.setTimeout(function () {
@@ -1245,7 +1247,7 @@
     fields: [
       { name: 'asset', label: 'Image', widget: 's3-image' },
     ],
-    pattern: /^::s3-image\{objectKey="([^"]+)"(?: alt="([^"]*)")?(?: width="([^"]*)")?(?: height="([^"]*)")?\}\n::$/m,
+    pattern: /^::s3-image\{objectKey="([^"]+)"(?: alt="([^"]*)")?(?: width="([^"]*)")?(?: height="([^"]*)")?\}\n::$/,
     fromBlock: function (match) {
       return {
         asset: {
@@ -1278,30 +1280,35 @@
   CMS.registerEditorComponent({
     id: 's3-video',
     label: 'Video',
-    widget: 's3-video',
     fields: [
+      { name: 'asset', label: 'Video', widget: 's3-video', openPickerOnMount: true },
       { name: 'posterKey', label: 'Poster object key', widget: 'string', required: false },
     ],
-    pattern: /^::s3-video\{objectKey="([^"]+)"(?: posterKey="([^"]*)")?(?: description="([^"]*)")?\}\n::$/m,
+    pattern: /^::s3-video\{objectKey="([^"]+)"(?: posterKey="([^"]*)")?(?: description="([^"]*)")?\}\n::$/,
     fromBlock: function (match) {
       return {
-        provider: 's3',
-        key: match[1],
-        alt: match[3] || '',
-        kind: 'video',
+        asset: {
+          provider: 's3',
+          key: match[1],
+          alt: match[3] || '',
+          kind: 'video',
+          posterKey: match[2] || '',
+        },
         posterKey: match[2] || '',
       };
     },
     toBlock: function (data) {
-      var asset = valueToJS(data.asset || data);
+      var dataValue = valueToJS(data);
+      var asset = valueToJS(dataValue.asset || dataValue);
       if (!asset.key) return '';
       var attrs = 'objectKey="' + escapeAttr(asset.key) + '"';
-      if (data.posterKey || asset.posterKey) attrs += ' posterKey="' + escapeAttr(data.posterKey || asset.posterKey) + '"';
+      if (dataValue.posterKey || asset.posterKey) attrs += ' posterKey="' + escapeAttr(dataValue.posterKey || asset.posterKey) + '"';
       if (asset.alt) attrs += ' description="' + escapeAttr(asset.alt) + '"';
       return '::s3-video{' + attrs + '}\n::';
     },
     toPreview: function (data) {
-      var asset = valueToJS(data.asset || data);
+      var dataValue = valueToJS(data);
+      var asset = valueToJS(dataValue.asset || dataValue);
       var url = getAssetPreviewUrl(asset);
       return url
         ? '<video src="' + escapeAttr(url) + '" controls style="max-width:100%;"></video>'
