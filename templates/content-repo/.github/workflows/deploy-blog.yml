@@ -32,6 +32,8 @@ env:
   BLOG_APP_WORKFLOW_FILE: ${{ vars.BLOG_APP_WORKFLOW_FILE || 'build-image.yml' }}
   BLOG_DISPATCH_EVENT: ${{ vars.BLOG_DISPATCH_EVENT || 'blog-content-updated' }}
   BLOG_IMAGE: ${{ vars.BLOG_IMAGE || '{{BLOG_IMAGE}}' }}
+  BLOG_REFRESH_URL: ${{ vars.BLOG_REFRESH_URL }}
+  BLOG_REFRESH_TOKEN_PRESENT: ${{ secrets.BLOG_REFRESH_TOKEN != '' }}
   ARGOCD_REPO_TOKEN_PRESENT: ${{ secrets.ARGOCD_REPO_TOKEN != '' }}
   ARGOCD_REPO: ${{ vars.ARGOCD_REPO || 'owner/infra' }}
   ARGOCD_BRANCH: ${{ vars.ARGOCD_BRANCH || 'main' }}
@@ -175,6 +177,14 @@ jobs:
               ;;
           esac
 
+      - name: Validate content refresh configuration
+        if: env.BLOG_REFRESH_URL != ''
+        run: |
+          if [ "${BLOG_REFRESH_TOKEN_PRESENT}" != "true" ]; then
+            echo "::error::Set BLOG_REFRESH_TOKEN to the blog CMS admin token or clear BLOG_REFRESH_URL."
+            exit 1
+          fi
+
       - name: Checkout deployment repo
         if: env.BLOG_AUTOMATION_MODE == 'deploy' && (env.BLOG_DEPLOY_MODE == 'gitops' || env.BLOG_DEPLOY_MODE == 'either') && env.ARGOCD_REPO_TOKEN_PRESENT == 'true'
         uses: actions/checkout@v7
@@ -246,6 +256,15 @@ jobs:
           IMAGE_WITH_TAG="${BLOG_IMAGE}:${CONTENT_SHA}"
           kubectl -n "${KUBE_NAMESPACE}" set image "deployment/${KUBE_DEPLOYMENT}" "${KUBE_CONTAINER}=${IMAGE_WITH_TAG}"
           kubectl -n "${KUBE_NAMESPACE}" rollout status "deployment/${KUBE_DEPLOYMENT}" --timeout=300s
+
+      - name: Refresh running blog content
+        if: env.BLOG_REFRESH_URL != ''
+        env:
+          BLOG_REFRESH_TOKEN: ${{ secrets.BLOG_REFRESH_TOKEN }}
+        run: |
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${BLOG_REFRESH_TOKEN}" \
+            "${BLOG_REFRESH_URL}"
 
       - name: Report completion
         run: |

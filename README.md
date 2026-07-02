@@ -260,7 +260,7 @@ Production deployment has three separate pieces:
 2. Your private content repo stores Markdown.
 3. Your infrastructure repo or platform deploys the image and provides runtime envs/secrets.
 
-The image is not content-bound. It reads `NUXT_PUBLIC_CMS_CONTENT_REPO` or `BLOG_CONTENT_REPOSITORY` at runtime and refreshes content after `BLOG_CONTENT_CACHE_TTL_MS`.
+The image is not content-bound. It reads `NUXT_PUBLIC_CMS_CONTENT_REPO` or `BLOG_CONTENT_REPOSITORY` at runtime and keeps content in memory.
 
 ## Docker Build
 
@@ -295,6 +295,14 @@ For Kubernetes, keep manifests, image-pull secrets, runtime secrets, and rollout
 
 ## Publishing Content
 
-Publishing or updating a post is just a commit to the content repo. The running app refreshes from Git after `BLOG_CONTENT_CACHE_TTL_MS`, so ordinary content changes do not require rebuilding the image.
+Publishing or updating a post is just a commit to the content repo. After content-side automation finishes any generated translation commits, call the refresh endpoint to update the running app without rebuilding the image:
+
+```bash
+curl -fsS -X POST \
+  -H "Authorization: Bearer $NUXT_CMS_ADMIN_TOKEN" \
+  https://your-blog.example.com/api/cms/content/refresh
+```
+
+Normal page and API requests do not wait for a Git refresh. On startup or cache miss, the server starts a background refresh and serves the current in-memory content immediately. By default, content is refreshed manually by the endpoint above. Set `BLOG_CONTENT_CACHE_TTL_MS` to a positive value only if you also want stale-while-revalidate background polling.
 
 If your content repo has extra automation, such as generated translations or an infrastructure-specific rollout hook, keep that workflow in the private content or infra repo. Do not put live deployment credentials in this public app repo.

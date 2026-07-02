@@ -54,7 +54,7 @@ NUXT_PUBLIC_CMS_CONTENT_BRANCH={{BLOG_CONTENT_BRANCH}}
 BLOG_CONTENT_AUTH_TOKEN=github_token_with_read_access_to_this_repo
 ```
 
-The public app image does not rebuild when content changes. A running app refreshes this repository from Git after `BLOG_CONTENT_CACHE_TTL_MS`.
+The public app image does not rebuild when content changes. A running app keeps content in memory and exposes a protected refresh endpoint for content-side automation.
 
 Keep real infrastructure credentials in a private deployment repo or in this private content repo. The public app repo should build images only.
 
@@ -74,6 +74,20 @@ Set this repository variable when the workflow is included:
 ```env
 BLOG_AUTOMATION_MODE={{BLOG_AUTOMATION_MODE}}
 ```
+
+### Runtime Refresh
+
+Set these when you want this repository's workflow to refresh the running blog after generated translations are committed:
+
+```env
+# secret
+BLOG_REFRESH_TOKEN=the_blog_NUXT_CMS_ADMIN_TOKEN
+
+# variable
+BLOG_REFRESH_URL=https://your-blog.example.com/api/cms/content/refresh
+```
+
+The workflow calls this endpoint with `Authorization: Bearer $BLOG_REFRESH_TOKEN`. This refresh is independent of image builds; use it for the normal content-only path after posts and translations are updated.
 
 ### Translation
 

@@ -176,8 +176,18 @@ export const assertCmsGitHubTokenCanWriteContentRepo = async (event: H3Event, to
 
 export const assertCmsGitHubProxyAuthorized = (event: H3Event, config = getCmsGitHubProxyConfig(event)) => {
   assertCmsGitHubProxyConfigured(config)
+  assertCmsAdminAuthorized(event, config)
+}
 
-  if (!config.adminToken) return
+export const assertCmsAdminAuthorized = (event: H3Event, config = getCmsGitHubProxyConfig(event)) => {
+  if (!config.adminToken && process.env.NODE_ENV !== 'production') return
+
+  if (!config.adminToken) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: 'CMS admin token is not configured',
+    })
+  }
 
   const provided = getAuthorizationToken(event)
 

@@ -19,7 +19,7 @@ import { useRuntimeConfig } from '#imports'
 import type { H3Event } from 'h3'
 
 const execFileAsync = promisify(execFile)
-const defaultCacheTtlMs = 60 * 1000
+const defaultCacheTtlMs = 0
 
 export type RuntimeArticleDocument = Record<string, any>
 
@@ -49,11 +49,17 @@ interface FileRef {
 interface RuntimeContentCache {
   key: string
   expiresAt: number
+  refreshedAt: number
   value: RuntimeContent
 }
 
 let runtimeContentCache: RuntimeContentCache | undefined
 let pendingRuntimeContent: { key: string, promise: Promise<RuntimeContent> } | undefined
+
+const emptyRuntimeContent: RuntimeContent = {
+  articles: [],
+  translations: [],
+}
 
 const readString = (runtimeValue: unknown, envNames: string[], fallback = '') => {
   for (const envName of envNames) {
@@ -467,41 +473,27 @@ const loadRuntimeContent = async (config: RuntimeContentConfig) => {
   }
 }
 
-export const getRuntimeContent = async (event?: H3Event): Promise<RuntimeContent> => {
-  const config = getRuntimeContentConfig(event)
-  const now = Date.now()
+const getCacheExpiresAt = (config: RuntimeContentConfig) =>
+  config.cacheTtlMs > 0 ? Date.now() + config.cacheTtlMs : Number.POSITIVE_INFINITY
 
-  if (
-    runtimeContentCache?.key === config.key &&
-    runtimeContentCache.expiresAt > now
-  ) {
-    return runtimeContentCache.value
+const cacheRuntimeContent = (config: RuntimeContentConfig, value: RuntimeContent) => {
+  runtimeContentCache = {
+    key: config.key,
+    expiresAt: getCacheExpiresAt(config),
+    refreshedAt: Date.now(),
+    value,
   }
 
+  return value
+}
+
+const startRuntimeContentRefresh = (config: RuntimeContentConfig) => {
   if (pendingRuntimeContent?.key === config.key) {
     return pendingRuntimeContent.promise
   }
 
-  const staleValue = runtimeContentCache?.key === config.key
-    ? runtimeContentCache.value
-    : undefined
-
   const promise = loadRuntimeContent(config)
-    .then((value) => {
-      runtimeContentCache = {
-        key: config.key,
-        expiresAt: Date.now() + config.cacheTtlMs,
-        value,
-      }
-      return value
-    })
-    .catch((error) => {
-      if (staleValue) {
-        console.error('Failed to refresh runtime blog content; serving stale content.', error)
-        return staleValue
-      }
-      throw error
-    })
+    .then((value) => cacheRuntimeContent(config, value))
     .finally(() => {
       if (pendingRuntimeContent?.key === config.key) {
         pendingRuntimeContent = undefined
@@ -510,4 +502,53 @@ export const getRuntimeContent = async (event?: H3Event): Promise<RuntimeContent
 
   pendingRuntimeContent = { key: config.key, promise }
   return promise
+}
+
+const refreshRuntimeContentInBackground = (config: RuntimeContentConfig) => {
+  void startRuntimeContentRefresh(config).catch((error) => {
+    console.error('Failed to refresh runtime blog content.', error)
+  })
+}
+
+export const refreshRuntimeContent = async (event?: H3Event): Promise<RuntimeContent> =>
+  startRuntimeContentRefresh(getRuntimeContentConfig(event))
+
+export const warmRuntimeContent = async (event?: H3Event): Promise<void> => {
+  const config = getRuntimeContentConfig(event)
+
+  if (runtimeContentCache?.key === config.key || pendingRuntimeContent?.key === config.key) return
+
+  refreshRuntimeContentInBackground(config)
+}
+
+export const getRuntimeContentStatus = (event?: H3Event) => {
+  const config = getRuntimeContentConfig(event)
+  const cache = runtimeContentCache?.key === config.key ? runtimeContentCache : undefined
+
+  return {
+    cached: Boolean(cache),
+    refreshing: pendingRuntimeContent?.key === config.key,
+    cacheTtlMs: config.cacheTtlMs,
+    refreshedAt: cache?.refreshedAt,
+    expiresAt: Number.isFinite(cache?.expiresAt) ? cache?.expiresAt : undefined,
+    articles: cache?.value.articles.length ?? 0,
+    translations: cache?.value.translations.length ?? 0,
+  }
+}
+
+export const getRuntimeContent = async (event?: H3Event): Promise<RuntimeContent> => {
+  const config = getRuntimeContentConfig(event)
+  const now = Date.now()
+  const cache = runtimeContentCache?.key === config.key ? runtimeContentCache : undefined
+
+  if (cache) {
+    if (config.cacheTtlMs > 0 && cache.expiresAt <= now) {
+      refreshRuntimeContentInBackground(config)
+    }
+
+    return cache.value
+  }
+
+  refreshRuntimeContentInBackground(config)
+  return emptyRuntimeContent
 }
