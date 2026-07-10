@@ -1,10 +1,12 @@
 import {
   AmbientLight,
   BoxGeometry,
+  BufferGeometry,
   CanvasTexture,
   Color,
   DirectionalLight,
   DynamicDrawUsage,
+  Float32BufferAttribute,
   HemisphereLight,
   InstancedMesh,
   LinearFilter,
@@ -86,6 +88,8 @@ const labelWidth = caseWidth * 0.94
 const labelHeight = caseHeight * 0.955
 const spineLabelWidth = caseDepth * 0.86
 const spineLabelHeight = caseHeight * 0.9
+const spineAtlasCellWidth = 56
+const spineAtlasCellHeight = 384
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
@@ -186,46 +190,29 @@ const createLabel = () => {
   }
 }
 
-const wrapSpineTitle = (
-  context: CanvasRenderingContext2D,
-  title: string,
-  maxWidth: number,
-  maxLines: number,
-) => {
-  const characters = Array.from(title.trim().replace(/\s+/g, ' '))
-  const lines: string[] = []
-  let line = ''
-  let consumed = 0
-
-  for (const character of characters) {
-    const candidate = `${line}${character}`
-    if (line && context.measureText(candidate).width > maxWidth) {
-      lines.push(line.trim())
-      if (lines.length === maxLines) break
-      line = character === ' ' ? '' : character
-    } else {
-      line = candidate
-    }
-    consumed += 1
-  }
-
-  if (line && lines.length < maxLines) lines.push(line.trim())
-  const truncated = consumed < characters.length
-  if (truncated && lines.length) {
-    let last = lines[lines.length - 1]
-    while (last.length > 1 && context.measureText(`${last}…`).width > maxWidth) {
-      last = last.slice(0, -1)
-    }
-    lines[lines.length - 1] = `${last}…`
-  }
-
-  return { lines, truncated }
+interface SpineAtlasRect {
+  u0: number
+  u1: number
+  v0: number
+  v1: number
+  x: number
+  y: number
 }
 
-const createSpineLabel = () => {
+const createSpineAtlas = (articleCount: number) => {
+  const columns = Math.max(
+    1,
+    Math.min(
+      articleCount,
+      Math.ceil(
+        Math.sqrt(articleCount * spineAtlasCellHeight / spineAtlasCellWidth),
+      ),
+    ),
+  )
+  const rows = Math.max(1, Math.ceil(articleCount / columns))
   const canvas = document.createElement('canvas')
-  canvas.width = 160
-  canvas.height = 1200
+  canvas.width = columns * spineAtlasCellWidth
+  canvas.height = rows * spineAtlasCellHeight
   const context = canvas.getContext('2d', { alpha: false })
   if (!context) throw new Error('Canvas 2D is unavailable')
 
@@ -235,51 +222,143 @@ const createSpineLabel = () => {
   texture.minFilter = LinearFilter
   texture.magFilter = LinearFilter
 
-  return {
-    canvas,
-    context,
-    texture,
-    articleIndex: -1,
-    paintKey: '',
-  }
+  const gutter = 2
+  const rects: SpineAtlasRect[] = Array.from(
+    { length: articleCount },
+    (_, index) => {
+      const x = (index % columns) * spineAtlasCellWidth
+      const y = Math.floor(index / columns) * spineAtlasCellHeight
+      return {
+        x,
+        y,
+        u0: (x + gutter) / canvas.width,
+        u1: (x + spineAtlasCellWidth - gutter) / canvas.width,
+        v0: 1 - (y + spineAtlasCellHeight - gutter) / canvas.height,
+        v1: 1 - (y + gutter) / canvas.height,
+      }
+    },
+  )
+
+  return { canvas, context, texture, rects, paintKey: '' }
 }
 
-const paintSpineLabel = (
-  label: ReturnType<typeof createSpineLabel>,
-  article: ArchiveSceneArticle,
-  index: number,
+const truncateSpineTitle = (
+  context: CanvasRenderingContext2D,
+  title: string,
+  maxWidth: number,
+) => {
+  const normalized = title.trim().replace(/\s+/g, ' ')
+  if (context.measureText(normalized).width <= maxWidth) return normalized
+
+  const characters = Array.from(normalized)
+  let lower = 0
+  let upper = characters.length
+  while (lower < upper) {
+    const middle = Math.ceil((lower + upper) / 2)
+    const candidate = `${characters.slice(0, middle).join('').trimEnd()}…`
+    if (context.measureText(candidate).width <= maxWidth) {
+      lower = middle
+    } else {
+      upper = middle - 1
+    }
+  }
+  return `${characters.slice(0, lower).join('').trimEnd()}…`
+}
+
+const paintSpineAtlas = (
+  atlas: ReturnType<typeof createSpineAtlas>,
+  articles: ArchiveSceneArticle[],
   titleFontFamily: string,
 ) => {
-  const paintKey = `${index}:${titleFontFamily}`
-  if (label.paintKey === paintKey) return
-  label.paintKey = paintKey
-  label.articleIndex = index
+  if (atlas.paintKey === titleFontFamily) return
+  atlas.paintKey = titleFontFamily
 
-  const { canvas, context } = label
+  const { canvas, context } = atlas
   context.fillStyle = '#ffffff'
   context.fillRect(0, 0, canvas.width, canvas.height)
   context.fillStyle = '#20252a'
   context.textAlign = 'center'
   context.textBaseline = 'middle'
   context.letterSpacing = '0px'
+  context.font = `600 26px ${titleFontFamily}`
 
-  let fontSize = 36
-  let wrapped = { lines: [] as string[], truncated: true }
-  while (fontSize >= 20) {
-    context.font = `700 ${fontSize}px ${titleFontFamily}`
-    wrapped = wrapSpineTitle(context, article.title, 128, 15)
-    if (!wrapped.truncated || fontSize === 20) break
-    fontSize -= 2
+  for (let index = 0; index < articles.length; index++) {
+    const rect = atlas.rects[index]
+    if (!rect) continue
+    const title = truncateSpineTitle(
+      context,
+      articles[index].title,
+      spineAtlasCellHeight - 34,
+    )
+    context.save()
+    context.translate(
+      rect.x + spineAtlasCellWidth / 2,
+      rect.y + spineAtlasCellHeight / 2,
+    )
+    // The glyphs stay in normal horizontal typesetting; the complete line is
+    // rotated onto the case so its baseline follows the spine's long axis.
+    context.rotate(Math.PI / 2)
+    context.fillText(title, 0, 0)
+    context.restore()
   }
+  atlas.texture.needsUpdate = true
+}
 
-  const lineHeight = fontSize * 1.22
-  const blockHeight = wrapped.lines.length * lineHeight
-  let y = (canvas.height - blockHeight + lineHeight) / 2
-  for (const line of wrapped.lines) {
-    context.fillText(line, canvas.width / 2, y)
-    y += lineHeight
-  }
-  label.texture.needsUpdate = true
+const createShelfSpineGeometry = (
+  restMatrices: Matrix4[],
+  spineLabelOffset: Matrix4,
+  rects: SpineAtlasRect[],
+) => {
+  const positions = new Float32Array(restMatrices.length * 4 * 3)
+  const uvs = new Float32Array(restMatrices.length * 4 * 2)
+  const indices: number[] = []
+  const worldMatrix = new Matrix4()
+  const point = new Vector3()
+  const localPoints = [
+    [-spineLabelWidth / 2, spineLabelHeight / 2, 0],
+    [spineLabelWidth / 2, spineLabelHeight / 2, 0],
+    [-spineLabelWidth / 2, -spineLabelHeight / 2, 0],
+    [spineLabelWidth / 2, -spineLabelHeight / 2, 0],
+  ] as const
+
+  restMatrices.forEach((restMatrix, articleIndex) => {
+    worldMatrix.multiplyMatrices(restMatrix, spineLabelOffset)
+    const positionOffset = articleIndex * 12
+    for (let vertexIndex = 0; vertexIndex < 4; vertexIndex++) {
+      const local = localPoints[vertexIndex]
+      point.set(local[0], local[1], local[2]).applyMatrix4(worldMatrix)
+      point.toArray(positions, positionOffset + vertexIndex * 3)
+    }
+
+    const rect = rects[articleIndex]
+    const uvOffset = articleIndex * 8
+    uvs.set([
+      rect.u0, rect.v1,
+      rect.u1, rect.v1,
+      rect.u0, rect.v0,
+      rect.u1, rect.v0,
+    ], uvOffset)
+
+    const vertexOffset = articleIndex * 4
+    indices.push(
+      vertexOffset,
+      vertexOffset + 2,
+      vertexOffset + 1,
+      vertexOffset + 2,
+      vertexOffset + 3,
+      vertexOffset + 1,
+    )
+  })
+
+  const geometry = new BufferGeometry()
+  const positionAttribute = new Float32BufferAttribute(positions, 3)
+  positionAttribute.setUsage(DynamicDrawUsage)
+  geometry.setAttribute('position', positionAttribute)
+  geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2))
+  geometry.setIndex(indices)
+  geometry.computeVertexNormals()
+
+  return { geometry, restPositions: positions.slice() }
 }
 
 const paintLabel = (
@@ -449,24 +528,16 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     return mesh
   })
 
-  // Only the one or two cases participating in the current browse handoff get
-  // spine textures. This keeps title feedback immediate without allocating a
-  // texture and draw call for every article on low-end devices.
-  const spineLabelGeometry = new PlaneGeometry(spineLabelWidth, spineLabelHeight)
-  const spineLabels = [createSpineLabel(), createSpineLabel()]
-  const spineLabelMeshes = spineLabels.map((label) => {
-    const spineLabelMaterial = new MeshStandardMaterial({
-      map: label.texture,
-      color: 0xffffff,
-      roughness: 0.84,
-      metalness: 0,
-    })
-    const mesh = new Mesh(spineLabelGeometry, spineLabelMaterial)
-    mesh.matrixAutoUpdate = false
-    mesh.visible = false
-    mesh.frustumCulled = false
-    scene.add(mesh)
-    return mesh
+  // One atlas keeps every title resident while still uploading only a single
+  // texture. The shelf labels are batched below, so article count does not
+  // become article-count draw calls.
+  const spineAtlas = createSpineAtlas(articles.length)
+  paintSpineAtlas(spineAtlas, articles, titleFontFamily)
+  const spineLabelMaterial = new MeshStandardMaterial({
+    map: spineAtlas.texture,
+    color: 0xffffff,
+    roughness: 0.84,
+    metalness: 0,
   })
 
   const poseObject = new Object3D()
@@ -500,6 +571,31 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     poseObject.updateMatrix()
     return poseObject.matrix.clone()
   })
+  const {
+    geometry: shelfSpineGeometry,
+    restPositions: shelfSpineRestPositions,
+  } = createShelfSpineGeometry(
+    restMatrices,
+    spineLabelOffset,
+    spineAtlas.rects,
+  )
+  const shelfSpineMesh = new Mesh(shelfSpineGeometry, spineLabelMaterial)
+  shelfSpineMesh.frustumCulled = false
+  scene.add(shelfSpineMesh)
+
+  // The two cases crossing the active selection boundary leave the static
+  // batch and receive tiny dynamic quads that share the same atlas/material.
+  const activeSpineGeometries = [0, 1].map(
+    () => new PlaneGeometry(spineLabelWidth, spineLabelHeight),
+  )
+  const activeSpineMeshes = activeSpineGeometries.map((spineGeometry) => {
+    const mesh = new Mesh(spineGeometry, spineLabelMaterial)
+    mesh.matrixAutoUpdate = false
+    mesh.visible = false
+    mesh.frustumCulled = false
+    scene.add(mesh)
+    return mesh
+  })
   const poseResult: CasePose = {
     matrix: poseObject.matrix,
     faceVisibility: 0,
@@ -518,6 +614,8 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
   let cardTitleAlignment: 'left' | 'center' = 'center'
   let hiddenIndexA = -1
   let hiddenIndexB = -1
+  let hiddenSpineIndexA = -1
+  let hiddenSpineIndexB = -1
 
   restMatrices.forEach((matrix, articleIndex) => {
     cases.setMatrixAt(articleIndex, matrix)
@@ -682,27 +780,33 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     mesh.visible = true
   }
 
-  const setSpineLabelMatrix = (
+  const setSpineGeometryArticle = (
+    spineGeometry: PlaneGeometry,
+    articleIndex: number,
+  ) => {
+    if (spineGeometry.userData.articleIndex === articleIndex) return
+    const rect = spineAtlas.rects[articleIndex]
+    const uv = spineGeometry.getAttribute('uv')
+    uv.setXY(0, rect.u0, rect.v1)
+    uv.setXY(1, rect.u1, rect.v1)
+    uv.setXY(2, rect.u0, rect.v0)
+    uv.setXY(3, rect.u1, rect.v0)
+    uv.needsUpdate = true
+    spineGeometry.userData.articleIndex = articleIndex
+  }
+
+  const setActiveSpineLabel = (
     mesh: Mesh,
-    label: ReturnType<typeof createSpineLabel>,
+    spineGeometry: PlaneGeometry,
     articleIndex: number,
     frame: ArchiveSceneFrame,
   ) => {
-    const article = articles[articleIndex]
-    if (!article) {
+    if (articleIndex < 0 || articleIndex >= articles.length) {
       mesh.visible = false
       return
     }
 
-    // The spine title is for browsing. As soon as the case begins turning,
-    // hand legibility over to the full front label instead of compressing the
-    // spine text into an unreadable edge-on sliver.
-    if (presentationForIndex(articleIndex, frame) >= turnStart) {
-      mesh.visible = false
-      return
-    }
-
-    paintSpineLabel(label, article, articleIndex, titleFontFamily)
+    setSpineGeometryArticle(spineGeometry, articleIndex)
     const pose = getPose(articleIndex, frame)
     mesh.matrix.copy(pose.matrix).multiply(spineLabelOffset)
     mesh.visible = true
@@ -742,6 +846,54 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     hiddenIndexA = indexA
     hiddenIndexB = indexB
     if (changed) cases.instanceMatrix.needsUpdate = true
+  }
+
+  const setShelfSpineVisible = (articleIndex: number, visible: boolean) => {
+    if (articleIndex < 0 || articleIndex >= articles.length) return false
+    const position = shelfSpineGeometry.getAttribute('position')
+    const offset = articleIndex * 12
+
+    if (visible) {
+      for (let component = 0; component < 12; component++) {
+        position.array[offset + component] =
+          shelfSpineRestPositions[offset + component]
+      }
+    } else {
+      const x = shelfSpineRestPositions[offset]
+      const y = shelfSpineRestPositions[offset + 1]
+      const z = shelfSpineRestPositions[offset + 2]
+      for (let vertex = 0; vertex < 4; vertex++) {
+        position.setXYZ(articleIndex * 4 + vertex, x, y, z)
+      }
+    }
+    return true
+  }
+
+  const syncActiveShelfSpines = (indexA: number, indexB: number) => {
+    const previous = [hiddenSpineIndexA, hiddenSpineIndexB]
+      .filter(
+        (index, slot, values) => index >= 0 && values.indexOf(index) === slot,
+      )
+    const next = [indexA, indexB]
+      .filter(
+        (index, slot, values) => index >= 0 && values.indexOf(index) === slot,
+      )
+    let changed = false
+
+    for (const articleIndex of previous) {
+      if (!next.includes(articleIndex)) {
+        changed = setShelfSpineVisible(articleIndex, true) || changed
+      }
+    }
+    for (const articleIndex of next) {
+      if (!previous.includes(articleIndex)) {
+        changed = setShelfSpineVisible(articleIndex, false) || changed
+      }
+    }
+
+    hiddenSpineIndexA = indexA
+    hiddenSpineIndexB = indexB
+    if (changed) shelfSpineGeometry.getAttribute('position').needsUpdate = true
   }
 
   const setActiveCase = (
@@ -793,43 +945,22 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     upper: number,
     frame: ArchiveSceneFrame,
   ) => {
-    const lowerSlot = spineLabels[0].articleIndex === lower
-      ? 0
-      : spineLabels[1].articleIndex === lower
-        ? 1
-        : 0
-
-    if (upper === lower) {
-      const hiddenSlot = lowerSlot === 0 ? 1 : 0
-      setSpineLabelMatrix(
-        spineLabelMeshes[lowerSlot],
-        spineLabels[lowerSlot],
-        lower,
-        frame,
-      )
-      spineLabelMeshes[hiddenSlot].visible = false
-      return
-    }
-
-    let upperSlot = spineLabels[0].articleIndex === upper
-      ? 0
-      : spineLabels[1].articleIndex === upper
-        ? 1
-        : lowerSlot === 0 ? 1 : 0
-    if (upperSlot === lowerSlot) upperSlot = lowerSlot === 0 ? 1 : 0
-
-    setSpineLabelMatrix(
-      spineLabelMeshes[lowerSlot],
-      spineLabels[lowerSlot],
+    setActiveSpineLabel(
+      activeSpineMeshes[0],
+      activeSpineGeometries[0],
       lower,
       frame,
     )
-    setSpineLabelMatrix(
-      spineLabelMeshes[upperSlot],
-      spineLabels[upperSlot],
-      upper,
-      frame,
-    )
+    if (upper === lower) {
+      activeSpineMeshes[1].visible = false
+    } else {
+      setActiveSpineLabel(
+        activeSpineMeshes[1],
+        activeSpineGeometries[1],
+        upper,
+        frame,
+      )
+    }
   }
 
   const resize = () => {
@@ -892,6 +1023,7 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     const lower = clamp(Math.floor(frame.position), 0, articles.length - 1)
     const upper = clamp(Math.ceil(frame.position), 0, articles.length - 1)
     const secondIndex = upper === lower ? -1 : upper
+    syncActiveShelfSpines(lower, secondIndex)
     syncActiveShelfCases(lower, secondIndex)
     setActiveCase(activeCases[0], lower, frame)
     setActiveCase(activeCases[1], secondIndex, frame)
@@ -992,9 +1124,8 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
       labels.forEach((label) => {
         label.paintKey = ''
       })
-      spineLabels.forEach((label) => {
-        label.paintKey = ''
-      })
+      spineAtlas.paintKey = ''
+      paintSpineAtlas(spineAtlas, articles, titleFontFamily)
     },
     resize() {
       width = 0
@@ -1005,18 +1136,12 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
       geometry.dispose()
       material.dispose()
       labelGeometry.dispose()
-      spineLabelGeometry.dispose()
+      shelfSpineGeometry.dispose()
+      activeSpineGeometries.forEach((spineGeometry) => spineGeometry.dispose())
       labels.forEach((label) => label.texture.dispose())
-      spineLabels.forEach((label) => label.texture.dispose())
+      spineAtlas.texture.dispose()
+      spineLabelMaterial.dispose()
       labelMeshes.forEach((mesh) => {
-        const meshMaterial = mesh.material
-        if (Array.isArray(meshMaterial)) {
-          meshMaterial.forEach((item) => item.dispose())
-        } else {
-          meshMaterial.dispose()
-        }
-      })
-      spineLabelMeshes.forEach((mesh) => {
         const meshMaterial = mesh.material
         if (Array.isArray(meshMaterial)) {
           meshMaterial.forEach((item) => item.dispose())
