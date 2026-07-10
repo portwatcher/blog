@@ -101,7 +101,7 @@ const trackStyle = computed(() => ({
 const articleLocation = (article: Article) => ({
   name: 'articles-title',
   params: { title: getArticleRouteTitle(article) },
-  query: { lang: locale.value },
+  state: { archiveOrigin: '/archive' },
 })
 
 const formatDate = (value: string) => {
@@ -175,7 +175,7 @@ const openArticle = async (
     count: articles.value.length,
   }
 
-  void primeArchiveArticle(routeTitle, locale.value)
+  void primeArchiveArticle(routeTitle)
   try {
     void preloadRouteComponents(destination).catch(() => undefined)
   } catch {
@@ -190,7 +190,7 @@ const openArticle = async (
     await archiveTransition.coverFromShelf(record, geometry)
     if (operation !== openOperation || route.path !== '/archive') return
     expectedDestination = destination
-    await navigateTo(destination)
+    await router.push(articleLocation(article))
     const currentRoute = router.currentRoute.value
     const currentRouteTitle = String(
       Array.isArray(currentRoute.params.title)
@@ -202,7 +202,6 @@ const openArticle = async (
       && (
         currentRoute.name !== 'articles-title'
         || currentRouteTitle !== routeTitle
-        || String(currentRoute.query.lang || '') !== locale.value
       )
     ) {
       throw new Error('Article navigation did not reach its destination')

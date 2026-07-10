@@ -92,6 +92,9 @@ const languageLabels: Record<string, string> = {
 
 const getRouteTitle = (value: unknown) =>
   String(Array.isArray(value) ? value[0] || '' : value || '')
+let openedFromArchive = Boolean(
+  archiveTransition.state.value.record?.routeTitle === getRouteTitle(route.params.title),
+)
 
 titleOwnedByTransition.value = Boolean(
   archiveTransition.state.value.record?.routeTitle === getRouteTitle(route.params.title)
@@ -241,6 +244,9 @@ const languageTabs = computed(() =>
 )
 
 onMounted(async () => {
+  openedFromArchive = openedFromArchive || Boolean(
+    window.history.state?.archiveOrigin === '/archive',
+  )
   void applyMarkdownImageLayout()
   await nextTick()
   const routeTitle = getRouteTitle(route.params.title)
@@ -273,7 +279,16 @@ onMounted(async () => {
 
 onBeforeRouteLeave((to) => {
   const routeTitle = getRouteTitle(route.params.title)
-  if (to.path === '/archive') {
+  // On a native history traversal the browser URL/state moves before Vue
+  // Router runs leave guards. Programmatic header links still point at the
+  // current article here, so they must remain untouched.
+  const browserIsAtTarget = import.meta.client
+    && window.history.state?.current === to.fullPath
+  const recoverSkippedArchive = openedFromArchive
+    && browserIsAtTarget
+    && to.path !== '/archive'
+
+  if (to.path === '/archive' || recoverSkippedArchive) {
     const titleRect = articleTitleText.value?.getBoundingClientRect()
       || articleTitle.value?.getBoundingClientRect()
       || new DOMRect()
@@ -289,6 +304,8 @@ onBeforeRouteLeave((to) => {
       titleOwnedByTransition.value = false
       await archiveTransition.cancel()
     })
+
+    if (recoverSkippedArchive) return { path: '/archive' }
     return
   }
 
