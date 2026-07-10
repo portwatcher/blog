@@ -1028,10 +1028,14 @@ onMounted(async () => {
   }
 
   const nav = navigator as Navigator & { deviceMemory?: number }
+  const coreCount = navigator.hardwareConcurrency || 4
+  const deviceMemory = nav.deviceMemory
   const lowPower =
-    window.matchMedia('(pointer: coarse)').matches
-    || navigator.hardwareConcurrency <= 4
-    || (nav.deviceMemory !== undefined && nav.deviceMemory <= 4)
+    (deviceMemory !== undefined && deviceMemory <= 2)
+    || (
+      coreCount <= 4
+      && (deviceMemory === undefined || deviceMemory <= 4)
+    )
 
   try {
     const { createArchiveScene } = await import('~/lib/archive-scene')

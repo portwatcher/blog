@@ -91,8 +91,12 @@ const labelWidth = caseWidth * 0.94
 const labelHeight = caseHeight * 0.955
 const spineLabelWidth = caseDepth * 0.86
 const spineLabelHeight = caseHeight * 0.9
+const labelLogicalWidth = 384
+const labelLogicalHeight = 576
+const labelTextureScale = 1.5
 const spineAtlasCellWidth = 56
 const spineAtlasCellHeight = 384
+const spineAtlasTextureScale = 1.25
 const spineTitleMaxFontSize = 26
 const spineTitleMinFontSize = 18
 
@@ -169,10 +173,11 @@ const wrapTitle = (
 
 const createLabel = () => {
   const canvas = document.createElement('canvas')
-  canvas.width = 384
-  canvas.height = 576
+  canvas.width = labelLogicalWidth * labelTextureScale
+  canvas.height = labelLogicalHeight * labelTextureScale
   const context = canvas.getContext('2d', { alpha: false })
   if (!context) throw new Error('Canvas 2D is unavailable')
+  context.scale(labelTextureScale, labelTextureScale)
 
   const texture = new CanvasTexture(canvas)
   texture.colorSpace = SRGBColorSpace
@@ -184,6 +189,8 @@ const createLabel = () => {
     canvas,
     context,
     texture,
+    logicalWidth: labelLogicalWidth,
+    logicalHeight: labelLogicalHeight,
     articleIndex: -1,
     paintKey: '',
     titleBounds: {
@@ -215,11 +222,14 @@ const createSpineAtlas = (articleCount: number) => {
     ),
   )
   const rows = Math.max(1, Math.ceil(articleCount / columns))
+  const logicalWidth = columns * spineAtlasCellWidth
+  const logicalHeight = rows * spineAtlasCellHeight
   const canvas = document.createElement('canvas')
-  canvas.width = columns * spineAtlasCellWidth
-  canvas.height = rows * spineAtlasCellHeight
+  canvas.width = logicalWidth * spineAtlasTextureScale
+  canvas.height = logicalHeight * spineAtlasTextureScale
   const context = canvas.getContext('2d', { alpha: false })
   if (!context) throw new Error('Canvas 2D is unavailable')
+  context.scale(spineAtlasTextureScale, spineAtlasTextureScale)
 
   const texture = new CanvasTexture(canvas)
   texture.colorSpace = SRGBColorSpace
@@ -236,15 +246,23 @@ const createSpineAtlas = (articleCount: number) => {
       return {
         x,
         y,
-        u0: (x + gutter) / canvas.width,
-        u1: (x + spineAtlasCellWidth - gutter) / canvas.width,
-        v0: 1 - (y + spineAtlasCellHeight - gutter) / canvas.height,
-        v1: 1 - (y + gutter) / canvas.height,
+        u0: (x + gutter) / logicalWidth,
+        u1: (x + spineAtlasCellWidth - gutter) / logicalWidth,
+        v0: 1 - (y + spineAtlasCellHeight - gutter) / logicalHeight,
+        v1: 1 - (y + gutter) / logicalHeight,
       }
     },
   )
 
-  return { canvas, context, texture, rects, paintKey: '' }
+  return {
+    canvas,
+    context,
+    texture,
+    rects,
+    logicalWidth,
+    logicalHeight,
+    paintKey: '',
+  }
 }
 
 const truncateSpineTitle = (
@@ -278,9 +296,9 @@ const paintSpineAtlas = (
   if (atlas.paintKey === titleFontFamily) return
   atlas.paintKey = titleFontFamily
 
-  const { canvas, context } = atlas
+  const { context } = atlas
   context.fillStyle = '#ffffff'
-  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.fillRect(0, 0, atlas.logicalWidth, atlas.logicalHeight)
   context.fillStyle = '#20252a'
   context.textAlign = 'center'
   context.textBaseline = 'middle'
@@ -396,13 +414,18 @@ const paintLabel = (
   label.paintKey = paintKey
   label.articleIndex = index
 
-  const { canvas, context } = label
+  const { context } = label
   context.fillStyle = '#ffffff'
-  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.fillRect(0, 0, label.logicalWidth, label.logicalHeight)
 
   context.strokeStyle = '#dadee3'
   context.lineWidth = 2
-  context.strokeRect(18, 18, canvas.width - 36, canvas.height - 36)
+  context.strokeRect(
+    18,
+    18,
+    label.logicalWidth - 36,
+    label.logicalHeight - 36,
+  )
 
   context.fillStyle = '#5e646b'
   context.font = '600 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
@@ -424,12 +447,12 @@ const paintLabel = (
 
   const lineHeight = (fontSize + 2) * 1.14
   const blockHeight = lines.length * lineHeight
-  const titleTop = (canvas.height - blockHeight) * 0.48
+  const titleTop = (label.logicalHeight - blockHeight) * 0.48
   let titleWidth = 1
   for (const line of lines) {
     titleWidth = Math.max(titleWidth, context.measureText(line).width)
   }
-  const titleX = titleAlignment === 'center' ? canvas.width / 2 : 36
+  const titleX = titleAlignment === 'center' ? label.logicalWidth / 2 : 36
   let y = titleTop
   label.titleBounds = {
     left: titleAlignment === 'center' ? titleX - titleWidth / 2 : titleX,
@@ -552,6 +575,17 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
   // become article-count draw calls.
   const spineAtlas = createSpineAtlas(articles.length)
   paintSpineAtlas(spineAtlas, articles, titleFontFamily)
+  const textureAnisotropy = Math.max(
+    1,
+    Math.min(
+      lowPower ? 2 : 4,
+      renderer.capabilities.getMaxAnisotropy(),
+    ),
+  )
+  labels.forEach((label) => {
+    label.texture.anisotropy = textureAnisotropy
+  })
+  spineAtlas.texture.anisotropy = textureAnisotropy
   const spineLabelMaterial = new MeshStandardMaterial({
     map: spineAtlas.texture,
     color: 0xffffff,
@@ -1058,7 +1092,11 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
 
     width = nextWidth
     height = nextHeight
-    const maxRatio = lowPower ? 1 : 1.25
+    // Mid-tier phones can afford a modest supersample and benefit much more
+    // from it than desktop-sized viewports. Truly constrained devices retain a
+    // smaller cap, while the pixel budget prevents tablets from scaling this
+    // cost without bound.
+    const maxRatio = lowPower ? 1.25 : 1.75
     const pixelBudgetRatio = Math.sqrt(1_500_000 / (width * height))
     const ratio = Math.min(
       window.devicePixelRatio || 1,
@@ -1181,13 +1219,17 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
       ? labels[1]
       : labels[0]
     const bounds = activeLabel.titleBounds
-    const titleLeft = (bounds.left / activeLabel.canvas.width - 0.5) * labelWidth
-    const titleRight = (
-      (bounds.left + bounds.width) / activeLabel.canvas.width - 0.5
+    const titleLeft = (
+      bounds.left / activeLabel.logicalWidth - 0.5
     ) * labelWidth
-    const titleTop = (0.5 - bounds.top / activeLabel.canvas.height) * labelHeight
+    const titleRight = (
+      (bounds.left + bounds.width) / activeLabel.logicalWidth - 0.5
+    ) * labelWidth
+    const titleTop = (
+      0.5 - bounds.top / activeLabel.logicalHeight
+    ) * labelHeight
     const titleBottom = (
-      0.5 - (bounds.top + bounds.height) / activeLabel.canvas.height
+      0.5 - (bounds.top + bounds.height) / activeLabel.logicalHeight
     ) * labelHeight
     const titleRect = projectBounds(
       pose.matrix,
