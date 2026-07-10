@@ -93,6 +93,8 @@ const spineLabelWidth = caseDepth * 0.86
 const spineLabelHeight = caseHeight * 0.9
 const spineAtlasCellWidth = 56
 const spineAtlasCellHeight = 384
+const spineTitleMaxFontSize = 26
+const spineTitleMinFontSize = 18
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
@@ -283,15 +285,29 @@ const paintSpineAtlas = (
   context.textAlign = 'center'
   context.textBaseline = 'middle'
   context.letterSpacing = '0px'
-  context.font = `600 26px ${titleFontFamily}`
+  const maxTitleWidth = spineAtlasCellHeight - 34
 
   for (let index = 0; index < articles.length; index++) {
     const rect = atlas.rects[index]
     if (!rect) continue
+    const normalizedTitle = articles[index].title.trim().replace(/\s+/g, ' ')
+    context.font = `600 ${spineTitleMaxFontSize}px ${titleFontFamily}`
+    const naturalWidth = context.measureText(normalizedTitle).width
+    const proportionalSize = naturalWidth > 0
+      ? spineTitleMaxFontSize * Math.min(1, maxTitleWidth / naturalWidth)
+      : spineTitleMaxFontSize
+    // Preserve the full title whenever a modest reduction is enough. Only
+    // after reaching the legibility floor do we fall back to an ellipsis.
+    const fontSize = clamp(
+      Math.floor(proportionalSize * 10) / 10,
+      spineTitleMinFontSize,
+      spineTitleMaxFontSize,
+    )
+    context.font = `600 ${fontSize}px ${titleFontFamily}`
     const title = truncateSpineTitle(
       context,
-      articles[index].title,
-      spineAtlasCellHeight - 34,
+      normalizedTitle,
+      maxTitleWidth,
     )
     context.save()
     context.translate(
@@ -559,10 +575,29 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
   const raycaster = new Raycaster()
   const projectedPoint = new Vector3()
   const cameraTarget = new Vector3()
+  // Stable per-article variation reads as physical manufacturing/casual shelf
+  // placement while preserving batching and avoiding layout shifts on return.
+  const caseScales = articles.map((_, articleIndex) => ({
+    x: 1 + indexVariance(articleIndex + 37) * 0.018,
+    y: 1 + indexVariance(articleIndex + 73) * 0.014,
+    z: 1 + indexVariance(articleIndex + 109) * 0.045,
+  }))
+  const shelfXPositions = new Array<number>(articles.length).fill(0)
+  const baseSpineGap = spinePitch - caseDepth
+  for (let articleIndex = 1; articleIndex < articles.length; articleIndex++) {
+    const previousScale = caseScales[articleIndex - 1]
+    const currentScale = caseScales[articleIndex]
+    const variedGap = baseSpineGap
+      * (1 + indexVariance(articleIndex + 151) * 0.18)
+    shelfXPositions[articleIndex] = shelfXPositions[articleIndex - 1]
+      + caseDepth * (previousScale.z + currentScale.z) / 2
+      + variedGap
+  }
   const restMatrices = articles.map((_, articleIndex) => {
     const variance = indexVariance(articleIndex)
+    const caseScale = caseScales[articleIndex]
     poseObject.position.set(
-      articleIndex * spinePitch,
+      shelfXPositions[articleIndex],
       shelfY + variance * 0.025,
       shelfZ,
     )
@@ -572,7 +607,7 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
       variance * 0.038,
       'XYZ',
     )
-    poseObject.scale.set(1, 1, 1)
+    poseObject.scale.set(caseScale.x, caseScale.y, caseScale.z)
     poseObject.updateMatrix()
     return poseObject.matrix.clone()
   })
@@ -675,7 +710,11 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
       smootherstep(0.42, 1, upperPresentation),
       handoff,
     )
-    const focusX = mix(lower, upper, handoff) * spinePitch - 0.1 * turn
+    const focusX = mix(
+      shelfXPositions[lower],
+      shelfXPositions[upper],
+      handoff,
+    ) - 0.1 * turn
     const focusBaseY = mix(
       shelfY + indexVariance(lower) * 0.025,
       shelfY + indexVariance(upper) * 0.025,
@@ -719,10 +758,11 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
       ? 1
       : 0
     const variance = indexVariance(articleIndex)
+    const caseScale = caseScales[articleIndex]
     const scale = 1 + hover * 0.012
 
     poseObject.position.set(
-      articleIndex * spinePitch - 0.1 * turn,
+      shelfXPositions[articleIndex] - 0.1 * turn,
       shelfY + variance * 0.025 + 0.56 * lift,
       shelfZ + pullDistance * slide + hover * 0.1,
     )
@@ -744,7 +784,11 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
       poseObject.quaternion.slerp(facingObject.quaternion, align)
     }
 
-    poseObject.scale.set(scale, scale, mix(scale, 0.045, flatten))
+    poseObject.scale.set(
+      caseScale.x * scale,
+      caseScale.y * scale,
+      mix(caseScale.z * scale, 0.045, flatten),
+    )
     poseObject.updateMatrix()
 
     poseResult.matrix = poseObject.matrix

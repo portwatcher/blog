@@ -247,8 +247,7 @@ const clampPosition = (value: number) =>
 
 const switchThreshold = 0.82
 const scrollIdleFallbackMs = 260
-const wheelEndSettleMs = 120
-const contactEndSettleMs = 80
+const inputEndSettleMs = 30
 const axisDominance = 1.25
 const springStiffness = 190
 const springDamping = 20
@@ -787,7 +786,7 @@ const onWheel = () => {
       || horizontalScrolling.value
       || verticalScrolling.value
     ) settleActiveScroll()
-  }, wheelEndSettleMs)
+  }, inputEndSettleMs)
 }
 
 const scheduleContactEndSettle = () => {
@@ -795,11 +794,11 @@ const scheduleContactEndSettle = () => {
     window.clearTimeout(horizontalScrollTimer)
     horizontalScrollTimer = window.setTimeout(
       settleHorizontalScroll,
-      contactEndSettleMs,
+      inputEndSettleMs,
     )
   } else if (verticalScrolling.value) {
     window.clearTimeout(scrollTimer)
-    scrollTimer = window.setTimeout(settleScroll, contactEndSettleMs)
+    scrollTimer = window.setTimeout(settleScroll, inputEndSettleMs)
   }
 }
 
