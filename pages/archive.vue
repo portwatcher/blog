@@ -59,10 +59,17 @@ interface ArchiveSceneController {
   finishReturnPose: () => Promise<void>
 }
 
+interface ArchiveReturnController {
+  getActiveRects: () => ArchiveSceneRects
+  finishReturnPose: () => Promise<void>
+}
+
 let openOperation = 0
 let expectedDestination: string | null = null
 let activeOpenController: ArchiveSceneController | null = null
 let activeOpenGeometry: ArchiveSceneRects | undefined
+let returnController: ArchiveReturnController | null = null
+let returnOperation = 0
 
 const { data } = await useFetch<Article[]>('/api/articles', {
   query: computed(() => ({
@@ -75,7 +82,7 @@ const articles = computed(() => data.value || [])
 const sceneMode = ref<'pending' | 'webgl' | 'fallback'>('pending')
 
 const returning = computed(() =>
-  archiveTransition.state.value.phase === 'returning'
+  ['return-covering', 'returning'].includes(archiveTransition.state.value.phase)
   && Boolean(archiveTransition.state.value.record),
 )
 const initialIndex = computed(() => {
@@ -115,19 +122,39 @@ const setSceneMode = async (mode: 'webgl' | 'fallback') => {
   }
 }
 
-const onSceneReady = async (controller: {
-  getActiveRects: () => ArchiveSceneRects
-  finishReturnPose: () => Promise<void>
-}) => {
-  if (!returning.value) return
+const finishReturn = async () => {
+  if (
+    route.path !== '/archive'
+    || archiveTransition.state.value.phase !== 'returning'
+    || !returnController
+  ) return
+
+  const operation = ++returnOperation
+  const controller = returnController
+  returnController = null
 
   const geometry = controller.getActiveRects()
   const revealed = await archiveTransition.revealShelf(geometry)
-  if (!revealed) return
+  if (!revealed || operation !== returnOperation || route.path !== '/archive') return
 
   await controller.finishReturnPose()
+  if (operation !== returnOperation || route.path !== '/archive') return
   archiveTransition.completeReturn()
 }
+
+const onSceneReady = (controller: ArchiveReturnController) => {
+  if (!returning.value) return
+
+  returnController = controller
+  void finishReturn()
+}
+
+watch(
+  () => archiveTransition.state.value.phase,
+  (phase) => {
+    if (phase === 'returning') void finishReturn()
+  },
+)
 
 const openArticle = async (
   article: Article,
@@ -195,6 +222,8 @@ const openArticle = async (
 }
 
 onBeforeRouteLeave(async (to) => {
+  ++returnOperation
+  returnController = null
   if (expectedDestination && to.fullPath === expectedDestination) return
   if (!activeOpenController) return
 

@@ -271,26 +271,30 @@ onMounted(async () => {
   }
 })
 
-onBeforeRouteLeave(async (to) => {
+onBeforeRouteLeave((to) => {
   const routeTitle = getRouteTitle(route.params.title)
   if (to.path === '/archive') {
     const titleRect = articleTitleText.value?.getBoundingClientRect()
       || articleTitle.value?.getBoundingClientRect()
       || new DOMRect()
-    await archiveTransition.coverArticleForReturn(
+    void archiveTransition.coverArticleForReturn(
       routeTitle,
       titleRect,
       article.value?.title || '',
       () => {
         titleOwnedByTransition.value = true
       },
-    )
+    ).catch(async (error) => {
+      console.error('[archive] return transition failed', error)
+      titleOwnedByTransition.value = false
+      await archiveTransition.cancel()
+    })
     return
   }
 
   const destinationTitle = getRouteTitle(to.params.title)
   if (!destinationTitle || destinationTitle !== routeTitle) {
-    await archiveTransition.cancel()
+    void archiveTransition.cancel()
   }
 })
 
