@@ -761,7 +761,7 @@ const onHorizontalRailScroll = () => {
   window.clearTimeout(horizontalScrollTimer)
   horizontalScrollTimer = window.setTimeout(
     settleHorizontalScroll,
-    scrollIdleFallbackMs,
+    inputEndSettleMs,
   )
 }
 
@@ -798,7 +798,7 @@ const scheduleTouchReleaseFallback = () => {
     window.clearTimeout(horizontalScrollTimer)
     horizontalScrollTimer = window.setTimeout(
       settleHorizontalScroll,
-      scrollIdleFallbackMs,
+      inputEndSettleMs,
     )
   } else if (verticalScrolling.value) {
     window.clearTimeout(scrollTimer)
