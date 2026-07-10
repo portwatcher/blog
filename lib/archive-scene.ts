@@ -28,6 +28,7 @@ export interface ArchiveSceneArticle {
 export interface ArchiveSceneFrame {
   position: number
   selectedIndex: number
+  presentationProgress: number
   selectionProgress: number
   hovered: boolean
 }
@@ -76,6 +77,7 @@ const spinePitch = 0.88
 const shelfY = -0.28
 const shelfZ = -1.3
 const pullDistance = 3.3
+const browsingPullRatio = 0.15
 const turnStart = 0.58
 const cameraDepthOffset = pullDistance * 0.42
 const alignedCameraOffset = pullDistance - cameraDepthOffset
@@ -382,6 +384,7 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
   let currentFrame: ArchiveSceneFrame = {
     position: 0,
     selectedIndex: 0,
+    presentationProgress: 1,
     selectionProgress: 0,
     hovered: false,
   }
@@ -398,8 +401,29 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
   })
   cases.instanceMatrix.needsUpdate = true
 
-  const extractionForDistance = (distance: number) =>
-    distance >= 0.64 ? 0 : 1 - smootherstep(0, 0.64, distance)
+  const browsingWeightForDistance = (distance: number) =>
+    distance >= 1 ? 0 : 1 - smootherstep(0, 1, distance)
+
+  const presentationForIndex = (
+    articleIndex: number,
+    frame: ArchiveSceneFrame,
+  ) => articleIndex === frame.selectedIndex
+    ? smootherstep(0, 1, frame.presentationProgress)
+    : 0
+
+  const slideForIndex = (
+    articleIndex: number,
+    frame: ArchiveSceneFrame,
+    presentation: number,
+  ) => {
+    const browsingSlide = browsingPullRatio
+      * browsingWeightForDistance(Math.abs(articleIndex - frame.position))
+    return mix(
+      browsingSlide,
+      1,
+      smootherstep(0, 0.72, presentation),
+    )
+  }
 
   const updateCamera = (frame: ArchiveSceneFrame) => {
     const lower = clamp(Math.floor(frame.position), 0, articles.length - 1)
@@ -408,21 +432,21 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     const handoff = lower === upper
       ? 0
       : smootherstep(0.38, 0.62, fraction)
-    const lowerExtraction = extractionForDistance(Math.abs(lower - frame.position))
-    const upperExtraction = extractionForDistance(Math.abs(upper - frame.position))
+    const lowerPresentation = presentationForIndex(lower, frame)
+    const upperPresentation = presentationForIndex(upper, frame)
     const slide = mix(
-      smootherstep(0, 0.72, lowerExtraction),
-      smootherstep(0, 0.72, upperExtraction),
+      slideForIndex(lower, frame, lowerPresentation),
+      slideForIndex(upper, frame, upperPresentation),
       handoff,
     )
     const turn = mix(
-      smootherstep(turnStart, 1, lowerExtraction),
-      smootherstep(turnStart, 1, upperExtraction),
+      smootherstep(turnStart, 1, lowerPresentation),
+      smootherstep(turnStart, 1, upperPresentation),
       handoff,
     )
     const lift = mix(
-      smootherstep(0.42, 1, lowerExtraction),
-      smootherstep(0.42, 1, upperExtraction),
+      smootherstep(0.42, 1, lowerPresentation),
+      smootherstep(0.42, 1, upperPresentation),
       handoff,
     )
     const focusX = mix(lower, upper, handoff) * spinePitch - 0.1 * turn
@@ -454,16 +478,20 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
   }
 
   const getPose = (articleIndex: number, frame: ArchiveSceneFrame): CasePose => {
-    const distance = Math.abs(articleIndex - frame.position)
-    const extraction = extractionForDistance(distance)
-    const slide = smootherstep(0, 0.72, extraction)
-    const turn = smootherstep(turnStart, 1, extraction)
-    const lift = smootherstep(0.42, 1, extraction)
     const presented = articleIndex === frame.selectedIndex
+    const presentation = presentationForIndex(articleIndex, frame)
+    const slide = slideForIndex(articleIndex, frame, presentation)
+    const turn = smootherstep(turnStart, 1, presentation)
+    const lift = smootherstep(0.42, 1, presentation)
     const selected = presented ? frame.selectionProgress : 0
     const align = smootherstep(0, 0.62, selected)
     const flatten = smootherstep(0.62, 1, selected)
-    const hover = presented && frame.hovered && selected === 0 ? 1 : 0
+    const hover = presented
+      && frame.hovered
+      && presentation > 0.999
+      && selected === 0
+      ? 1
+      : 0
     const variance = indexVariance(articleIndex)
     const scale = 1 + hover * 0.012
 

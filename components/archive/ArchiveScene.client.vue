@@ -198,6 +198,8 @@ let lastVerticalControlPosition = 0
 let targetPosition = 0
 let displayPosition = 0
 let springVelocity = 0
+let presentationIndex = 0
+let presentationProgress = 1
 let selectionProgress = 0
 let hovered = false
 let disposed = false
@@ -226,6 +228,13 @@ let selectionTween: {
   duration: number
   resolve: () => void
 } | null = null
+let presentationTween: {
+  from: number
+  to: number
+  startedAt: number
+  duration: number
+  resolve: () => void
+} | null = null
 
 const clampIndex = (value: number) =>
   Math.min(Math.max(0, Math.round(value)), Math.max(0, props.articles.length - 1))
@@ -246,15 +255,15 @@ const supportsScrollEnd = (target: EventTarget) =>
 const sceneFrame: ArchiveSceneFrame = {
   position: 0,
   selectedIndex: 0,
+  presentationProgress: 1,
   selectionProgress: 0,
   hovered: false,
 }
 
 const draw = () => {
   sceneFrame.position = displayPosition
-  sceneFrame.selectedIndex = opening.value
-    ? currentIndex.value
-    : clampIndex(displayPosition)
+  sceneFrame.selectedIndex = presentationIndex
+  sceneFrame.presentationProgress = presentationProgress
   sceneFrame.selectionProgress = selectionProgress
   sceneFrame.hovered = hovered
   engine?.draw(sceneFrame)
@@ -275,7 +284,10 @@ const updateHitTarget = () => {
     height: `${Math.max(44, rect.height)}px`,
     transform: `translate3d(${rect.left - stageRect.left}px, ${rect.top - stageRect.top}px, 0)`,
   }
-  hitVisible.value = Math.abs(displayPosition - currentIndex.value) < 0.025
+  hitVisible.value = presentationIndex === currentIndex.value
+    && presentationProgress > 0.999
+    && !presentationTween
+    && Math.abs(displayPosition - currentIndex.value) < 0.025
 }
 
 const requestDraw = () => {
@@ -323,26 +335,43 @@ const frame = (now: number) => {
     }
   }
 
+  if (presentationTween) {
+    const elapsed = now - presentationTween.startedAt
+    const progress = Math.min(1, elapsed / presentationTween.duration)
+    presentationProgress = presentationTween.from
+      + (presentationTween.to - presentationTween.from) * progress
+    if (progress === 1) {
+      presentationProgress = presentationTween.to
+      const resolve = presentationTween.resolve
+      presentationTween = null
+      resolve()
+    }
+  }
+
   draw()
   const moving = Math.abs(targetPosition - displayPosition) >= springRestDistance
     || Math.abs(springVelocity) >= springRestSpeed
-  if (
-    selectionTween
-    || dragging.value
-    || horizontalScrolling.value
-    || verticalScrolling.value
-  ) {
+  if (directlyManipulated) {
     hitVisible.value = false
-    if (moving || selectionTween) requestDraw()
+    if (moving || selectionTween || presentationTween) requestDraw()
   } else if (moving) {
-    // The final sub-pixel spring tail should not block opening a card that is
-    // already visually picked. focusForOpen() snaps the remaining motion.
-    if (Math.abs(displayPosition - currentIndex.value) < 0.025) {
-      updateHitTarget()
-    } else {
-      hitVisible.value = false
-    }
+    hitVisible.value = false
     requestDraw()
+  } else if (opening.value || selectionTween) {
+    hitVisible.value = false
+    if (selectionTween || presentationTween) requestDraw()
+  } else if (presentationTween) {
+    hitVisible.value = false
+    requestDraw()
+  } else if (
+    presentationIndex !== currentIndex.value
+    || presentationProgress < 0.999
+  ) {
+    // Input and the snapping spring are both at rest. Only now may the
+    // committed article leave the shelf far enough to turn and present itself.
+    presentationIndex = currentIndex.value
+    hitVisible.value = false
+    void animatePresentation(1, 340)
   } else {
     announcedIndex.value = currentIndex.value
     updateHitTarget()
@@ -427,6 +456,7 @@ const beginScrub = () => {
   lastFrameTime = 0
   hovered = false
   hitVisible.value = false
+  void animatePresentation(0, 180)
 }
 
 const settleToCommitted = () => {
@@ -460,6 +490,9 @@ const goToIndex = (index: number) => {
   dragging.value = false
   horizontalScrolling.value = false
   verticalScrolling.value = false
+  hovered = false
+  hitVisible.value = false
+  void animatePresentation(0, 180)
   currentIndex.value = nextIndex
   targetPosition = nextIndex
   springVelocity = 0
@@ -517,6 +550,31 @@ const animateSelection = (to: number, duration: number) => {
   return new Promise<void>((resolve) => {
     selectionTween = {
       from: selectionProgress,
+      to,
+      startedAt: performance.now(),
+      duration,
+      resolve,
+    }
+    requestDraw()
+  })
+}
+
+const animatePresentation = (to: number, duration: number) => {
+  if (presentationTween) {
+    presentationTween.resolve()
+    presentationTween = null
+  }
+  lastFrameTime = 0
+
+  if (Math.abs(presentationProgress - to) < 0.001) {
+    presentationProgress = to
+    requestDraw()
+    return Promise.resolve()
+  }
+
+  return new Promise<void>((resolve) => {
+    presentationTween = {
+      from: presentationProgress,
       to,
       startedAt: performance.now(),
       duration,
@@ -740,6 +798,10 @@ const focusForOpen = async () => {
   horizontalScrolling.value = false
   verticalScrolling.value = false
   hovered = false
+  presentationTween?.resolve()
+  presentationTween = null
+  presentationIndex = currentIndex.value
+  presentationProgress = 1
   displayPosition = currentIndex.value
   targetPosition = currentIndex.value
   springVelocity = 0
@@ -757,6 +819,8 @@ const finishReturnPose = async () => {
   await animateSelection(0, 320)
   if (disposed || !engine) return
   opening.value = false
+  presentationIndex = currentIndex.value
+  presentationProgress = 1
   targetPosition = currentIndex.value
   displayPosition = currentIndex.value
   springVelocity = 0
@@ -818,6 +882,8 @@ const teardownScene = () => {
   boundCanvas = null
   selectionTween?.resolve()
   selectionTween = null
+  presentationTween?.resolve()
+  presentationTween = null
   engine?.destroy()
   engine = null
 }
@@ -919,6 +985,8 @@ onMounted(async () => {
   announcedIndex.value = currentIndex.value
   targetPosition = currentIndex.value
   displayPosition = currentIndex.value
+  presentationIndex = currentIndex.value
+  presentationProgress = 1
   selectionProgress = props.returning ? 1 : 0
   opening.value = props.returning
 
