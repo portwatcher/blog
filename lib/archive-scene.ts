@@ -272,7 +272,7 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     canvas,
     context,
     alpha: false,
-    antialias: false,
+    antialias: true,
     depth: true,
     stencil: false,
     preserveDrawingBuffer: false,

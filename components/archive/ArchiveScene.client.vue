@@ -250,6 +250,7 @@ const springStiffness = 190
 const springDamping = 20
 const springRestDistance = 0.0006
 const springRestSpeed = 0.006
+const presentationDuration = 300
 const supportsScrollEnd = (target: EventTarget) =>
   'onscrollend' in (target as EventTarget & { onscrollend?: unknown })
 const sceneFrame: ArchiveSceneFrame = {
@@ -355,7 +356,17 @@ const frame = (now: number) => {
     hitVisible.value = false
     if (moving || selectionTween || presentationTween) requestDraw()
   } else if (moving) {
-    hitVisible.value = false
+    // Presentation and the snap spring intentionally overlap. Once the card is
+    // fully out and the remaining spring tail is visually negligible, it is
+    // ready to open even though the camera is still settling by a few pixels.
+    if (
+      presentationProgress > 0.999
+      && Math.abs(displayPosition - currentIndex.value) < 0.025
+    ) {
+      updateHitTarget()
+    } else {
+      hitVisible.value = false
+    }
     requestDraw()
   } else if (opening.value || selectionTween) {
     hitVisible.value = false
@@ -367,11 +378,11 @@ const frame = (now: number) => {
     presentationIndex !== currentIndex.value
     || presentationProgress < 0.999
   ) {
-    // Input and the snapping spring are both at rest. Only now may the
-    // committed article leave the shelf far enough to turn and present itself.
+    // Covers initialization and non-scroll state changes. Scroll settling
+    // starts this presentation immediately so it can overlap the snap spring.
     presentationIndex = currentIndex.value
     hitVisible.value = false
-    void animatePresentation(1, 340)
+    void animatePresentation(1, presentationDuration)
   } else {
     announcedIndex.value = currentIndex.value
     updateHitTarget()
@@ -474,9 +485,13 @@ const settleToCommitted = () => {
   horizontalScrolling.value = false
   verticalScrolling.value = false
   currentIndex.value = nextIndex
+  presentationIndex = nextIndex
   targetPosition = nextIndex
   springVelocity = 0
   lastFrameTime = 0
+  // Scrolling is over: start the one full extraction now instead of waiting
+  // for the spring's imperceptible tail. Both finish visually within 300ms.
+  void animatePresentation(1, presentationDuration)
   syncWindowScroll(scrollTopForIndex(nextIndex))
   syncHorizontalRail(nextIndex)
   requestDraw()
@@ -920,7 +935,9 @@ onMounted(async () => {
 
   const context = canvas.value.getContext('webgl2', {
     alpha: false,
-    antialias: false,
+    // Native framebuffer MSAA is the cheapest useful edge treatment here: it
+    // avoids a post-processing pass and remains bounded by the pixel budget.
+    antialias: true,
     depth: true,
     stencil: false,
     preserveDrawingBuffer: false,
