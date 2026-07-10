@@ -582,6 +582,31 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     y: 1 + indexVariance(articleIndex + 73) * 0.014,
     z: 1 + indexVariance(articleIndex + 109) * 0.045,
   }))
+  const caseYawAngles = articles.map(
+    (_, articleIndex) => indexVariance(articleIndex) * 0.018,
+  )
+  const caseLeanAngles = new Array<number>(articles.length).fill(0)
+  let leanGroupStart = 0
+  let leanGroupIndex = 0
+  while (leanGroupStart < articles.length) {
+    const remaining = articles.length - leanGroupStart
+    const groupSize = Math.min(
+      remaining,
+      2 + Math.floor((indexVariance(leanGroupIndex + 211) + 1) * 1.5),
+    )
+    const groupStrength = 0.019
+      + (indexVariance(leanGroupIndex + 257) + 1) * 0.0025
+    for (let offset = 0; offset < groupSize; offset++) {
+      const articleIndex = leanGroupStart + offset
+      const inwardLean = groupSize === 1
+        ? 0
+        : mix(-1, 1, offset / (groupSize - 1))
+      caseLeanAngles[articleIndex] = inwardLean * groupStrength
+        + indexVariance(articleIndex + 307) * 0.0015
+    }
+    leanGroupStart += groupSize
+    leanGroupIndex++
+  }
   const shelfXPositions = new Array<number>(articles.length).fill(0)
   const baseSpineGap = spinePitch - caseDepth
   for (let articleIndex = 1; articleIndex < articles.length; articleIndex++) {
@@ -593,19 +618,32 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
       + caseDepth * (previousScale.z + currentScale.z) / 2
       + variedGap
   }
+  const shelfBaseY = shelfY - caseHeight / 2
+  const shelfYPositions = articles.map((_, articleIndex) => {
+    const caseScale = caseScales[articleIndex]
+    const yaw = caseYawAngles[articleIndex]
+    const lean = caseLeanAngles[articleIndex]
+    const halfHeight = caseHeight * caseScale.y / 2
+    const halfShelfWidth = caseDepth * caseScale.z / 2 * Math.cos(yaw)
+      + caseWidth * caseScale.x / 2 * Math.abs(Math.sin(yaw))
+    const leanedHalfHeight = halfHeight * Math.cos(lean)
+      + halfShelfWidth * Math.abs(Math.sin(lean))
+    return shelfBaseY + leanedHalfHeight
+  })
   const restMatrices = articles.map((_, articleIndex) => {
-    const variance = indexVariance(articleIndex)
     const caseScale = caseScales[articleIndex]
     poseObject.position.set(
       shelfXPositions[articleIndex],
-      shelfY + variance * 0.025,
+      shelfYPositions[articleIndex],
       shelfZ,
     )
     poseObject.rotation.set(
       0,
-      Math.PI / 2 + variance * 0.018,
-      variance * 0.038,
-      'XYZ',
+      Math.PI / 2 + caseYawAngles[articleIndex],
+      caseLeanAngles[articleIndex],
+      // ZYX applies the lean in shelf space, so neighboring tops actually
+      // angle toward one another rather than merely rolling in depth.
+      'ZYX',
     )
     poseObject.scale.set(caseScale.x, caseScale.y, caseScale.z)
     poseObject.updateMatrix()
@@ -716,8 +754,8 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
       handoff,
     ) - 0.1 * turn
     const focusBaseY = mix(
-      shelfY + indexVariance(lower) * 0.025,
-      shelfY + indexVariance(upper) * 0.025,
+      shelfYPositions[lower],
+      shelfYPositions[upper],
       handoff,
     )
     const focusY = focusBaseY + 0.56 * lift
@@ -757,20 +795,19 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
       && selected === 0
       ? 1
       : 0
-    const variance = indexVariance(articleIndex)
     const caseScale = caseScales[articleIndex]
     const scale = 1 + hover * 0.012
 
     poseObject.position.set(
       shelfXPositions[articleIndex] - 0.1 * turn,
-      shelfY + variance * 0.025 + 0.56 * lift,
+      shelfYPositions[articleIndex] + 0.56 * lift,
       shelfZ + pullDistance * slide + hover * 0.1,
     )
     shelfRotationObject.rotation.set(
       0,
-      Math.PI / 2 + variance * 0.018,
-      variance * 0.038,
-      'XYZ',
+      Math.PI / 2 + caseYawAngles[articleIndex],
+      caseLeanAngles[articleIndex],
+      'ZYX',
     )
     poseObject.quaternion.slerpQuaternions(
       shelfRotationObject.quaternion,
