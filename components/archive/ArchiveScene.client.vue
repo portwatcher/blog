@@ -23,6 +23,7 @@
     @touchstart.passive="onTouchStart"
     @touchend.passive="onTouchEnd"
     @touchcancel.passive="onTouchEnd"
+    @wheel.passive="onWheel"
   >
     <div
       ref="horizontalRail"
@@ -188,6 +189,7 @@ let track: HTMLElement | null = null
 let resizeObserver: ResizeObserver | null = null
 let scrollTimer = 0
 let horizontalScrollTimer = 0
+let wheelTimer = 0
 let animationFrame = 0
 let lastFrameTime = 0
 let trackTop = 0
@@ -211,7 +213,8 @@ let suppressClickUntil = 0
 let activeHitRect: DOMRect | null = null
 let scrubAnchorIndex: number | null = null
 let touchContactActive = false
-let verticalSettlePending = false
+let wheelGestureActive = false
+let gestureSettlePending = false
 let dragGesture: {
   pointerId: number
   pointerType: string
@@ -243,7 +246,9 @@ const clampPosition = (value: number) =>
   Math.min(Math.max(0, value), Math.max(0, props.articles.length - 1))
 
 const switchThreshold = 0.82
-const scrollIdleSettleMs = 80
+const scrollIdleFallbackMs = 260
+const wheelEndSettleMs = 120
+const contactEndSettleMs = 80
 const axisDominance = 1.25
 const springStiffness = 190
 const springDamping = 20
@@ -472,12 +477,14 @@ const settleToCommitted = () => {
 
   window.clearTimeout(scrollTimer)
   window.clearTimeout(horizontalScrollTimer)
+  window.clearTimeout(wheelTimer)
+  wheelGestureActive = false
   const nextIndex = releasedIndex(
     scrubAnchorIndex ?? currentIndex.value,
     displayPosition,
   )
   scrubAnchorIndex = null
-  verticalSettlePending = false
+  gestureSettlePending = false
   dragging.value = false
   horizontalScrolling.value = false
   verticalScrolling.value = false
@@ -497,8 +504,12 @@ const settleToCommitted = () => {
 const goToIndex = (index: number) => {
   if (!ready.value || opening.value) return
   const nextIndex = clampIndex(index)
+  window.clearTimeout(scrollTimer)
+  window.clearTimeout(horizontalScrollTimer)
+  window.clearTimeout(wheelTimer)
+  wheelGestureActive = false
   scrubAnchorIndex = null
-  verticalSettlePending = false
+  gestureSettlePending = false
   dragging.value = false
   horizontalScrolling.value = false
   verticalScrolling.value = false
@@ -523,7 +534,11 @@ const settleScroll = () => {
     || !verticalScrolling.value
   ) return
   if (touchContactActive) {
-    verticalSettlePending = true
+    gestureSettlePending = true
+    return
+  }
+  if (wheelGestureActive) {
+    gestureSettlePending = true
     return
   }
   settleToCommitted()
@@ -551,7 +566,7 @@ const onScroll = () => {
   window.clearTimeout(scrollTimer)
   scrollTimer = window.setTimeout(
     settleScroll,
-    scrollIdleSettleMs,
+    scrollIdleFallbackMs,
   )
 }
 
@@ -713,6 +728,10 @@ const settleHorizontalScroll = () => {
     || verticalScrolling.value
     || !horizontalScrolling.value
   ) return
+  if (touchContactActive || wheelGestureActive) {
+    gestureSettlePending = true
+    return
+  }
   settleToCommitted()
 }
 
@@ -739,7 +758,7 @@ const onHorizontalRailScroll = () => {
   window.clearTimeout(horizontalScrollTimer)
   horizontalScrollTimer = window.setTimeout(
     settleHorizontalScroll,
-    scrollIdleSettleMs,
+    scrollIdleFallbackMs,
   )
 }
 
@@ -748,18 +767,65 @@ const onHorizontalRailScrollEnd = () => {
   settleHorizontalScroll()
 }
 
+const settleActiveScroll = () => {
+  if (horizontalScrolling.value) {
+    settleHorizontalScroll()
+  } else if (verticalScrolling.value) {
+    settleScroll()
+  }
+}
+
+const onWheel = () => {
+  if (!ready.value || opening.value || dragging.value) return
+  wheelGestureActive = true
+  gestureSettlePending = false
+  window.clearTimeout(wheelTimer)
+  wheelTimer = window.setTimeout(() => {
+    wheelGestureActive = false
+    if (
+      gestureSettlePending
+      || horizontalScrolling.value
+      || verticalScrolling.value
+    ) settleActiveScroll()
+  }, wheelEndSettleMs)
+}
+
+const scheduleContactEndSettle = () => {
+  if (horizontalScrolling.value) {
+    window.clearTimeout(horizontalScrollTimer)
+    horizontalScrollTimer = window.setTimeout(
+      settleHorizontalScroll,
+      contactEndSettleMs,
+    )
+  } else if (verticalScrolling.value) {
+    window.clearTimeout(scrollTimer)
+    scrollTimer = window.setTimeout(settleScroll, contactEndSettleMs)
+  }
+}
+
 const onTouchStart = (event: TouchEvent) => {
   touchContactActive = event.touches.length > 0
+  if (touchContactActive) gestureSettlePending = false
 }
 
 const onTouchEnd = (event: TouchEvent) => {
   touchContactActive = event.touches.length > 0
-  if (!touchContactActive && verticalSettlePending) settleScroll()
+  if (!touchContactActive) scheduleContactEndSettle()
 }
 
 const activateFromSurface = (event: MouseEvent) => {
-  if (!pointInsideActiveCase(event.clientX, event.clientY)) return
-  activateCurrent(event)
+  if (
+    event.detail
+    && performance.now() < suppressClickUntil
+  ) return
+
+  const pickedIndex = engine?.pickArticleAt(event.clientX, event.clientY)
+  if (pickedIndex === null || pickedIndex === undefined) return
+  if (pickedIndex === currentIndex.value && hitVisible.value) {
+    activateCurrent(event)
+    return
+  }
+  goToIndex(pickedIndex)
 }
 
 const activateCurrent = (event?: MouseEvent) => {
@@ -804,8 +870,10 @@ const focusForOpen = async () => {
   opening.value = true
   window.clearTimeout(scrollTimer)
   window.clearTimeout(horizontalScrollTimer)
+  window.clearTimeout(wheelTimer)
   scrubAnchorIndex = null
-  verticalSettlePending = false
+  wheelGestureActive = false
+  gestureSettlePending = false
   dragging.value = false
   horizontalScrolling.value = false
   verticalScrolling.value = false
@@ -866,6 +934,7 @@ const useFallback = (reason: string) => {
 const teardownScene = () => {
   window.clearTimeout(scrollTimer)
   window.clearTimeout(horizontalScrollTimer)
+  window.clearTimeout(wheelTimer)
   window.cancelAnimationFrame(animationFrame)
   animationFrame = 0
   window.removeEventListener('scroll', onScroll)
@@ -875,7 +944,8 @@ const teardownScene = () => {
   dragGesture = null
   scrubAnchorIndex = null
   touchContactActive = false
-  verticalSettlePending = false
+  wheelGestureActive = false
+  gestureSettlePending = false
   expectedProgrammaticScrollTop = null
   expectedHorizontalScrollLeft = null
   lastHorizontalControlPosition = 0

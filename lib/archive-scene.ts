@@ -16,8 +16,10 @@ import {
   Object3D,
   PerspectiveCamera,
   PlaneGeometry,
+  Raycaster,
   Scene,
   SRGBColorSpace,
+  Vector2,
   Vector3,
   WebGLRenderer,
 } from 'three'
@@ -43,6 +45,7 @@ export interface ArchiveSceneRects {
 export interface ArchiveSceneEngine {
   draw: (frame: ArchiveSceneFrame) => void
   getActiveRects: () => ArchiveSceneRects
+  pickArticleAt: (clientX: number, clientY: number) => number | null
   refreshTypography: () => void
   resize: () => void
   destroy: () => void
@@ -552,6 +555,8 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
   spineLabelOffsetObject.updateMatrix()
   const spineLabelOffset = spineLabelOffsetObject.matrix.clone()
   const hiddenMatrix = new Matrix4().makeScale(0, 0, 0)
+  const pickPoint = new Vector2()
+  const raycaster = new Raycaster()
   const projectedPoint = new Vector3()
   const cameraTarget = new Vector3()
   const restMatrices = articles.map((_, articleIndex) => {
@@ -903,11 +908,13 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
   ) => {
     if (articleIndex < 0 || articleIndex >= articles.length) {
       mesh.visible = false
+      mesh.userData.articleIndex = -1
       return
     }
 
     const pose = getPose(articleIndex, frame)
     mesh.matrix.copy(pose.matrix)
+    mesh.userData.articleIndex = articleIndex
     mesh.visible = true
   }
 
@@ -1114,12 +1121,45 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     return { surfaceRect, titleRect }
   }
 
+  const pickArticleAt = (clientX: number, clientY: number) => {
+    const rect = host.getBoundingClientRect()
+    if (
+      rect.width <= 0
+      || rect.height <= 0
+      || clientX < rect.left
+      || clientX > rect.right
+      || clientY < rect.top
+      || clientY > rect.bottom
+    ) return null
+
+    pickPoint.set(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    )
+    raycaster.setFromCamera(pickPoint, camera)
+    const intersections = raycaster.intersectObjects(
+      [cases, ...activeCases],
+      false,
+    )
+    for (const intersection of intersections) {
+      if (intersection.object === cases) {
+        return intersection.instanceId ?? null
+      }
+      const articleIndex = intersection.object.userData.articleIndex
+      if (Number.isInteger(articleIndex) && articleIndex >= 0) {
+        return articleIndex as number
+      }
+    }
+    return null
+  }
+
   resize()
   draw(currentFrame)
 
   return {
     draw,
     getActiveRects,
+    pickArticleAt,
     refreshTypography() {
       labels.forEach((label) => {
         label.paintKey = ''
