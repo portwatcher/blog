@@ -21,7 +21,6 @@
     @lostpointercapture="onPointerEnd"
     @pointerleave="setHovered(false)"
     @touchstart.passive="onTouchStart"
-    @touchmove.capture="onTouchMove"
     @touchend.passive="onTouchEnd"
     @touchcancel.passive="onTouchEnd"
     @wheel.passive="onWheel"
@@ -216,14 +215,6 @@ let scrubAnchorIndex: number | null = null
 let touchContactActive = false
 let wheelGestureActive = false
 let gestureSettlePending = false
-let touchGesture: {
-  identifier: number
-  startX: number
-  startY: number
-  startPosition: number
-  pixelsPerArticle: number
-  axis: 'pending' | 'horizontal'
-} | null = null
 let dragGesture: {
   pointerId: number
   pointerType: string
@@ -647,10 +638,10 @@ const pointInsideActiveCase = (clientX: number, clientY: number) => Boolean(
 
 const onPointerDown = (event: PointerEvent) => {
   if (!ready.value || opening.value || !event.isPrimary) return
-  // Touch Events provide the mobile path below. Keeping touch out of the
-  // Pointer Events path avoids Safari cancelling a drag when the scroll layer
-  // starts gesture arbitration.
-  if (event.pointerType === 'touch' && 'ontouchstart' in window) return
+  // The transparent rail owns touch panning so mobile browsers can provide
+  // their native momentum and deceleration. Pointer dragging remains the
+  // desktop mouse/pen path only.
+  if (event.pointerType === 'touch') return
   if (event.pointerType === 'mouse' && event.button !== 0) return
 
   const target = event.target as HTMLElement
@@ -802,98 +793,33 @@ const onWheel = () => {
   }, inputEndSettleMs)
 }
 
-const scheduleContactEndSettle = () => {
+const scheduleTouchReleaseFallback = () => {
   if (horizontalScrolling.value) {
     window.clearTimeout(horizontalScrollTimer)
     horizontalScrollTimer = window.setTimeout(
       settleHorizontalScroll,
-      inputEndSettleMs,
+      scrollIdleFallbackMs,
     )
   } else if (verticalScrolling.value) {
     window.clearTimeout(scrollTimer)
-    scrollTimer = window.setTimeout(settleScroll, inputEndSettleMs)
+    scrollTimer = window.setTimeout(settleScroll, scrollIdleFallbackMs)
   }
 }
-
-const getTouch = (touches: TouchList, identifier: number) =>
-  Array.from(touches).find((touch) => touch.identifier === identifier)
 
 const onTouchStart = (event: TouchEvent) => {
   touchContactActive = event.touches.length > 0
   if (touchContactActive) gestureSettlePending = false
-
-  if (!ready.value || opening.value) return
-  if (event.touches.length !== 1) {
-    const wasHorizontal = touchGesture?.axis === 'horizontal'
-    touchGesture = null
-    if (wasHorizontal) settleToCommitted()
-    return
-  }
-
-  const target = event.target as HTMLElement
-  if (target.closest('.archive-scene__arrow')) return
-
-  const touch = event.touches[0]
-  touchGesture = {
-    identifier: touch.identifier,
-    startX: touch.clientX,
-    startY: touch.clientY,
-    startPosition: displayPosition,
-    pixelsPerArticle: pixelsPerArticle(),
-    axis: 'pending',
-  }
-}
-
-const onTouchMove = (event: TouchEvent) => {
-  const gesture = touchGesture
-  if (!gesture || !ready.value || opening.value) return
-  const touch = getTouch(event.touches, gesture.identifier)
-  if (!touch) return
-
-  const deltaX = touch.clientX - gesture.startX
-  const deltaY = touch.clientY - gesture.startY
-  if (gesture.axis === 'pending') {
-    if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 10) return
-    if (Math.abs(deltaX) <= Math.abs(deltaY) * axisDominance) {
-      // Release a vertical gesture untouched so the page keeps its native
-      // momentum scrolling and browser chrome behavior.
-      touchGesture = null
-      return
-    }
-
-    gesture.axis = 'horizontal'
-    if (horizontalScrolling.value || verticalScrolling.value) {
-      settleToCommitted()
-    }
-    gesture.startPosition = displayPosition
-    beginScrub()
-    dragging.value = true
-    window.clearTimeout(scrollTimer)
-    window.clearTimeout(horizontalScrollTimer)
-  }
-
-  if (event.cancelable) event.preventDefault()
-  setInteractivePosition(
-    gesture.startPosition - deltaX / gesture.pixelsPerArticle,
-  )
 }
 
 const onTouchEnd = (event: TouchEvent) => {
   touchContactActive = event.touches.length > 0
-  const gesture = touchGesture
-  const trackedTouchEnded = gesture && Boolean(
-    getTouch(event.changedTouches, gesture.identifier),
-  )
-  if (trackedTouchEnded) {
-    const wasHorizontal = gesture.axis === 'horizontal'
-    touchGesture = null
-    if (wasHorizontal) {
-      suppressClickUntil = performance.now() + 350
-      settleToCommitted()
-      return
-    }
-  }
-  if (!touchContactActive) scheduleContactEndSettle()
+  if (touchContactActive || !gestureSettlePending) return
+
+  // Do not snap on touchend: the browser may only now be starting momentum.
+  // Scroll events keep resetting this fallback until inertia has fully ended;
+  // browsers with `scrollend` settle immediately through that event instead.
+  gestureSettlePending = false
+  scheduleTouchReleaseFallback()
 }
 
 const activateFromSurface = (event: MouseEvent) => {
@@ -955,7 +881,6 @@ const focusForOpen = async () => {
   window.clearTimeout(horizontalScrollTimer)
   window.clearTimeout(wheelTimer)
   scrubAnchorIndex = null
-  touchGesture = null
   touchContactActive = false
   wheelGestureActive = false
   gestureSettlePending = false
@@ -1027,7 +952,6 @@ const teardownScene = () => {
   window.removeEventListener('resize', measureTrack)
   document.removeEventListener('visibilitychange', requestDraw)
   dragGesture = null
-  touchGesture = null
   scrubAnchorIndex = null
   touchContactActive = false
   wheelGestureActive = false
@@ -1214,7 +1138,7 @@ onBeforeUnmount(() => {
   opacity: 0;
   outline: none;
   contain: layout paint size;
-  touch-action: pan-y pinch-zoom;
+  touch-action: pan-x pan-y pinch-zoom;
   overscroll-behavior-x: none;
   user-select: none;
   -webkit-user-select: none;
@@ -1256,7 +1180,8 @@ onBeforeUnmount(() => {
   overflow-y: hidden;
   overscroll-behavior-x: none;
   scrollbar-width: none;
-  touch-action: pan-y pinch-zoom;
+  touch-action: pan-x pan-y pinch-zoom;
+  -webkit-overflow-scrolling: touch;
   cursor: inherit;
 }
 
