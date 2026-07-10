@@ -2,7 +2,7 @@
   "name": "nuxt-app",
   "private": true,
   "type": "module",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "scripts": {
     "build": "nuxt build",
     "cms:s3-cors": "node scripts/configure-s3-cors.mjs",
