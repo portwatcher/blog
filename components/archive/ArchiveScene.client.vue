@@ -390,11 +390,17 @@ const frame = (now: number) => {
   }
 }
 
-const pixelsPerArticle = () =>
-  Math.min(
-    380,
-    Math.max(190, (stage.value?.clientWidth || window.innerWidth) * 0.42),
+const pixelsPerArticle = () => {
+  const viewportWidth = stage.value?.clientWidth || window.innerWidth
+  // Keep phone swipes long-range, then progressively restore desktop precision.
+  const widthProgress = Math.min(
+    1,
+    Math.max(0, (viewportWidth - 360) / (1280 - 360)),
   )
+  const viewportShare = 0.22 + widthProgress * 0.08
+
+  return Math.min(380, Math.max(72, viewportWidth * viewportShare))
+}
 
 const syncHorizontalRail = (position: number) => {
   if (!horizontalRail.value) return
