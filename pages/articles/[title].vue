@@ -9,7 +9,15 @@
         ref="articleTitle"
         class="title"
         tabindex="-1"
-      >{{ article.title }}</h1>
+      >
+        <span
+          ref="articleTitleText"
+          class="article-title-text"
+          :class="{ 'article-title-text--transition-owned': titleOwnedByTransition }"
+        >
+          {{ article.title }}
+        </span>
+      </h1>
 
       <nav
         v-if="languageTabs.length > 1"
@@ -74,6 +82,8 @@ const archiveTransition = useArchiveTransition()
 const password = ref<string | null>(null)
 const article = ref<Article | null>(null)
 const articleTitle = ref<HTMLElement | null>(null)
+const articleTitleText = ref<HTMLElement | null>(null)
+const titleOwnedByTransition = ref(false)
 const languageLabels: Record<string, string> = {
   zh: '中文',
   en: 'English',
@@ -82,6 +92,11 @@ const languageLabels: Record<string, string> = {
 
 const getRouteTitle = (value: unknown) =>
   String(Array.isArray(value) ? value[0] || '' : value || '')
+
+titleOwnedByTransition.value = Boolean(
+  archiveTransition.state.value.record?.routeTitle === getRouteTitle(route.params.title)
+  && ['opening', 'covered'].includes(archiveTransition.state.value.phase),
+)
 
 const configuredTranslationLanguages = computed(() =>
   String(config.public.translationLanguages || 'zh,en,ja')
@@ -229,7 +244,24 @@ onMounted(async () => {
   void applyMarkdownImageLayout()
   await nextTick()
   const routeTitle = getRouteTitle(route.params.title)
-  const revealed = await archiveTransition.revealArticle(routeTitle)
+  if (document.fonts?.status !== 'loaded') {
+    await Promise.race([
+      document.fonts.ready,
+      new Promise<void>((resolve) => window.setTimeout(resolve, 160)),
+    ])
+  }
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  const titleRect = articleTitleText.value?.getBoundingClientRect()
+    || articleTitle.value?.getBoundingClientRect()
+    || new DOMRect()
+  const revealed = await archiveTransition.revealArticle(
+    routeTitle,
+    titleRect,
+    article.value?.title || '',
+    () => {
+      titleOwnedByTransition.value = false
+    },
+  )
   if (
     revealed
     && getRouteTitle(route.params.title) === routeTitle
@@ -242,7 +274,17 @@ onMounted(async () => {
 onBeforeRouteLeave(async (to) => {
   const routeTitle = getRouteTitle(route.params.title)
   if (to.path === '/archive') {
-    await archiveTransition.coverArticleForReturn(routeTitle)
+    const titleRect = articleTitleText.value?.getBoundingClientRect()
+      || articleTitle.value?.getBoundingClientRect()
+      || new DOMRect()
+    await archiveTransition.coverArticleForReturn(
+      routeTitle,
+      titleRect,
+      article.value?.title || '',
+      () => {
+        titleOwnedByTransition.value = true
+      },
+    )
     return
   }
 
@@ -384,6 +426,15 @@ const unlock = async function () {
   line-height: 1.2;
   text-wrap: balance;
   overflow-wrap: anywhere;
+}
+
+.post .article-title-text {
+  display: inline-block;
+  max-width: 100%;
+}
+
+.post .article-title-text--transition-owned {
+  opacity: 0;
 }
 
 .markdown p:has(> img),

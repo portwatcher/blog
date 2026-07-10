@@ -46,10 +46,23 @@
 </template>
 
 <script setup lang="ts">
+import type { ArchiveSceneRects } from '~/lib/archive-scene'
+
 const config = useRuntimeConfig()
 const { locale, t } = useI18n()
 const router = useRouter()
+const route = useRoute()
 const archiveTransition = useArchiveTransition()
+
+interface ArchiveSceneController {
+  focusForOpen: () => Promise<ArchiveSceneRects>
+  finishReturnPose: () => Promise<void>
+}
+
+let openOperation = 0
+let expectedDestination: string | null = null
+let activeOpenController: ArchiveSceneController | null = null
+let activeOpenGeometry: ArchiveSceneRects | undefined
 
 const { data } = await useFetch<Article[]>('/api/articles', {
   query: computed(() => ({
@@ -81,6 +94,7 @@ const trackStyle = computed(() => ({
 const articleLocation = (article: Article) => ({
   name: 'articles-title',
   params: { title: getArticleRouteTitle(article) },
+  query: { lang: locale.value },
 })
 
 const formatDate = (value: string) => {
@@ -102,13 +116,13 @@ const setSceneMode = async (mode: 'webgl' | 'fallback') => {
 }
 
 const onSceneReady = async (controller: {
-  getActiveRect: () => DOMRect
+  getActiveRects: () => ArchiveSceneRects
   finishReturnPose: () => Promise<void>
 }) => {
   if (!returning.value) return
 
-  const rect = controller.getActiveRect()
-  const revealed = await archiveTransition.revealShelf(rect)
+  const geometry = controller.getActiveRects()
+  const revealed = await archiveTransition.revealShelf(geometry)
   if (!revealed) return
 
   await controller.finishReturnPose()
@@ -118,13 +132,14 @@ const onSceneReady = async (controller: {
 const openArticle = async (
   article: Article,
   index: number,
-  controller: {
-    focusForOpen: () => Promise<DOMRect>
-    finishReturnPose: () => Promise<void>
-  },
+  controller: ArchiveSceneController,
 ) => {
+  const operation = ++openOperation
   const routeTitle = getArticleRouteTitle(article)
   const destination = router.resolve(articleLocation(article)).fullPath
+  activeOpenController = controller
+  activeOpenGeometry = undefined
+  expectedDestination = null
   const record: ArchiveTransitionRecord = {
     title: article.title,
     routeTitle,
@@ -133,24 +148,65 @@ const openArticle = async (
     count: articles.value.length,
   }
 
-  void primeArchiveArticle(routeTitle)
+  void primeArchiveArticle(routeTitle, locale.value)
   try {
     void preloadRouteComponents(destination).catch(() => undefined)
   } catch {
     // Preloading is opportunistic; navigation remains fully functional without it.
   }
 
-  let rect: DOMRect | undefined
+  let geometry: ArchiveSceneRects | undefined
   try {
-    rect = await controller.focusForOpen()
-    await archiveTransition.coverFromShelf(record, rect)
+    geometry = await controller.focusForOpen()
+    if (operation !== openOperation || route.path !== '/archive') return
+    activeOpenGeometry = geometry
+    await archiveTransition.coverFromShelf(record, geometry)
+    if (operation !== openOperation || route.path !== '/archive') return
+    expectedDestination = destination
     await navigateTo(destination)
+    const currentRoute = router.currentRoute.value
+    const currentRouteTitle = String(
+      Array.isArray(currentRoute.params.title)
+        ? currentRoute.params.title[0] || ''
+        : currentRoute.params.title || '',
+    )
+    if (
+      operation === openOperation
+      && (
+        currentRoute.name !== 'articles-title'
+        || currentRouteTitle !== routeTitle
+        || String(currentRoute.query.lang || '') !== locale.value
+      )
+    ) {
+      throw new Error('Article navigation did not reach its destination')
+    }
   } catch (error) {
+    if (operation !== openOperation) return
     console.error('[archive] article transition failed', error)
-    await archiveTransition.cancel(rect)
+    await archiveTransition.cancel(geometry)
     await controller.finishReturnPose()
+  } finally {
+    if (operation === openOperation) {
+      activeOpenController = null
+      activeOpenGeometry = undefined
+      expectedDestination = null
+    }
   }
 }
+
+onBeforeRouteLeave(async (to) => {
+  if (expectedDestination && to.fullPath === expectedDestination) return
+  if (!activeOpenController) return
+
+  ++openOperation
+  const controller = activeOpenController
+  const geometry = activeOpenGeometry
+  activeOpenController = null
+  activeOpenGeometry = undefined
+  expectedDestination = null
+  await archiveTransition.cancel(geometry)
+  await controller.finishReturnPose()
+})
 
 useSeoMeta({
   title: () => t('archive'),

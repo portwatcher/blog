@@ -14,6 +14,11 @@ export interface ArchiveTransitionRecord {
   count: number
 }
 
+export interface ArchiveTransitionGeometry {
+  surfaceRect: DOMRectReadOnly
+  titleRect: DOMRectReadOnly
+}
+
 interface ArchiveTransitionState {
   phase: ArchiveTransitionPhase
   record: ArchiveTransitionRecord | null
@@ -25,10 +30,16 @@ interface ArchiveTransitionRuntime {
 }
 
 export interface ArchiveTransitionLayerController {
-  coverFrom: (rect: DOMRectReadOnly) => Promise<void>
-  reveal: () => Promise<void>
-  coverFull: () => Promise<void>
-  shrinkTo: (rect: DOMRectReadOnly) => Promise<void>
+  coverFrom: (geometry: ArchiveTransitionGeometry) => Promise<void>
+  reveal: (
+    titleRect: DOMRectReadOnly,
+    onTitleReady?: () => void,
+  ) => Promise<void>
+  coverFull: (
+    titleRect: DOMRectReadOnly,
+    onTitleReady?: () => void,
+  ) => Promise<void>
+  shrinkTo: (geometry: ArchiveTransitionGeometry) => Promise<void>
   reset: () => void
 }
 
@@ -104,66 +115,87 @@ export const useArchiveTransition = () => {
     state.value.record = null
   }
 
-  const cancel = async (rect?: DOMRectReadOnly) => {
+  const cancel = async (geometry?: ArchiveTransitionGeometry) => {
     const operation = beginOperation()
-    resetState()
 
     await runLayerOperation(operation, async (layer) => {
-      if (rect) {
-        await layer.shrinkTo(rect)
+      if (geometry) {
+        await layer.shrinkTo(geometry)
       } else {
         layer.reset()
       }
     })
+    if (isCurrentOperation(operation)) resetState()
   }
 
-  const coverFromShelf = async (record: ArchiveTransitionRecord, rect: DOMRectReadOnly) => {
+  const coverFromShelf = async (
+    record: ArchiveTransitionRecord,
+    geometry: ArchiveTransitionGeometry,
+  ) => {
     const operation = beginOperation()
     state.value.record = record
     state.value.phase = 'opening'
 
-    await runLayerOperation(operation, (layer) => layer.coverFrom(rect))
+    await runLayerOperation(operation, (layer) => layer.coverFrom(geometry))
     if (!isCurrentOperation(operation) || !recordMatches(record.routeTitle)) return
 
     state.value.phase = 'covered'
   }
 
-  const revealArticle = async (routeTitle: string) => {
+  const revealArticle = async (
+    routeTitle: string,
+    titleRect: DOMRectReadOnly,
+    title: string,
+    onTitleReady?: () => void,
+  ) => {
     if (!recordMatches(routeTitle)) {
       if (state.value.record || state.value.phase !== 'idle') await cancel()
       return false
     }
     if (state.value.phase !== 'covered') return false
+    if (state.value.record) state.value.record.title = title
 
     const operation = beginOperation()
-    await runLayerOperation(operation, (layer) => layer.reveal())
+    await runLayerOperation(operation, (layer) => layer.reveal(
+      titleRect,
+      onTitleReady,
+    ))
     if (!isCurrentOperation(operation) || !recordMatches(routeTitle)) return false
 
     state.value.phase = 'article'
     return true
   }
 
-  const coverArticleForReturn = async (routeTitle: string) => {
+  const coverArticleForReturn = async (
+    routeTitle: string,
+    titleRect: DOMRectReadOnly,
+    title: string,
+    onTitleReady?: () => void,
+  ) => {
     if (!recordMatches(routeTitle)) {
       if (state.value.record || state.value.phase !== 'idle') await cancel()
       return false
     }
     if (state.value.phase !== 'article' && state.value.phase !== 'covered') return false
+    if (state.value.record) state.value.record.title = title
 
     const operation = beginOperation()
     state.value.phase = 'return-covering'
-    await runLayerOperation(operation, (layer) => layer.coverFull())
+    await runLayerOperation(operation, (layer) => layer.coverFull(
+      titleRect,
+      onTitleReady,
+    ))
     if (!isCurrentOperation(operation) || !recordMatches(routeTitle)) return false
 
     state.value.phase = 'returning'
     return true
   }
 
-  const revealShelf = async (rect: DOMRectReadOnly) => {
+  const revealShelf = async (geometry: ArchiveTransitionGeometry) => {
     if (state.value.phase !== 'returning') return false
 
     const operation = beginOperation()
-    await runLayerOperation(operation, (layer) => layer.shrinkTo(rect))
+    await runLayerOperation(operation, (layer) => layer.shrinkTo(geometry))
     if (!isCurrentOperation(operation)) return false
 
     return true

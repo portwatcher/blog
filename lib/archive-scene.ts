@@ -32,9 +32,15 @@ export interface ArchiveSceneFrame {
   hovered: boolean
 }
 
+export interface ArchiveSceneRects {
+  surfaceRect: DOMRect
+  titleRect: DOMRect
+}
+
 export interface ArchiveSceneEngine {
   draw: (frame: ArchiveSceneFrame) => void
-  getActiveRect: () => DOMRect
+  getActiveRects: () => ArchiveSceneRects
+  refreshTypography: () => void
   resize: () => void
   destroy: () => void
 }
@@ -47,18 +53,34 @@ interface ArchiveSceneOptions {
   lowPower: boolean
   locale: string
   archiveLabel: string
+  titleFontFamily?: string
   backgroundColor?: number
 }
 
 interface CasePose {
   matrix: Matrix4
-  openness: number
+  faceVisibility: number
+}
+
+interface TitleBounds {
+  left: number
+  top: number
+  width: number
+  height: number
 }
 
 const caseWidth = 3.15
 const caseHeight = 4.6
-const caseDepth = 0.56
-const spinePitch = 0.63
+const caseDepth = 0.64
+const spinePitch = 0.88
+const shelfY = -0.28
+const shelfZ = -1.3
+const pullDistance = 3.3
+const turnStart = 0.58
+const cameraFollowRatio = 0.42
+const alignedCameraOffset = pullDistance * (1 - cameraFollowRatio)
+const labelWidth = caseWidth * 0.94
+const labelHeight = caseHeight * 0.955
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
@@ -66,9 +88,9 @@ const clamp = (value: number, min: number, max: number) =>
 const mix = (from: number, to: number, progress: number) =>
   from + (to - from) * progress
 
-const smoothstep = (edge0: number, edge1: number, value: number) => {
+const smootherstep = (edge0: number, edge1: number, value: number) => {
   const progress = clamp((value - edge0) / (edge1 - edge0), 0, 1)
-  return progress * progress * (3 - 2 * progress)
+  return progress * progress * progress * (progress * (progress * 6 - 15) + 10)
 }
 
 const indexVariance = (index: number) => {
@@ -76,15 +98,22 @@ const indexVariance = (index: number) => {
   return (value - Math.floor(value)) * 2 - 1
 }
 
+const dateFormatters = new Map<string, Intl.DateTimeFormat>()
+
 const formatDate = (value: string, locale: string) => {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
 
-  return new Intl.DateTimeFormat(locale, {
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-  }).format(date)
+  let formatter = dateFormatters.get(locale)
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(locale, {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+    })
+    dateFormatters.set(locale, formatter)
+  }
+  return formatter.format(date)
 }
 
 const wrapTitle = (
@@ -142,6 +171,13 @@ const createLabel = () => {
     context,
     texture,
     articleIndex: -1,
+    paintKey: '',
+    titleBounds: {
+      left: 36,
+      top: 190,
+      width: 306,
+      height: 120,
+    } satisfies TitleBounds,
   }
 }
 
@@ -152,8 +188,13 @@ const paintLabel = (
   count: number,
   locale: string,
   archiveLabel: string,
+  titleFontFamily: string,
+  initialTitleFontSize: number,
+  titleAlignment: 'left' | 'center',
 ) => {
-  if (label.articleIndex === index) return
+  const paintKey = `${index}:${initialTitleFontSize.toFixed(2)}:${titleAlignment}:${titleFontFamily}`
+  if (label.paintKey === paintKey) return
+  label.paintKey = paintKey
   label.articleIndex = index
 
   const { canvas, context } = label
@@ -174,26 +215,40 @@ const paintLabel = (
 
   context.textAlign = 'left'
   context.letterSpacing = '0px'
-  let fontSize = 46
+  let fontSize = initialTitleFontSize
   let lines: string[] = []
   do {
-    context.font = `650 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+    context.font = `700 ${fontSize}px ${titleFontFamily}`
     lines = wrapTitle(context, article.title, 306, 5)
     fontSize -= 2
   } while (lines.length > 4 && fontSize > 30)
 
   const lineHeight = (fontSize + 2) * 1.14
   const blockHeight = lines.length * lineHeight
-  let y = (canvas.height - blockHeight) * 0.48
+  const titleTop = (canvas.height - blockHeight) * 0.48
+  let titleWidth = 1
+  for (const line of lines) {
+    titleWidth = Math.max(titleWidth, context.measureText(line).width)
+  }
+  const titleX = titleAlignment === 'center' ? canvas.width / 2 : 36
+  let y = titleTop
+  label.titleBounds = {
+    left: titleAlignment === 'center' ? titleX - titleWidth / 2 : titleX,
+    top: titleTop - lineHeight / 2,
+    width: titleWidth,
+    height: blockHeight,
+  }
   context.fillStyle = '#0e1217'
+  context.textAlign = titleAlignment
   context.textBaseline = 'middle'
   for (const line of lines) {
-    context.fillText(line, 36, y)
+    context.fillText(line, titleX, y)
     y += lineHeight
   }
 
   context.fillStyle = '#5e646b'
   context.font = '500 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+  context.textAlign = 'left'
   context.textBaseline = 'bottom'
   context.fillText(formatDate(article.date, locale), 36, 532)
   label.texture.needsUpdate = true
@@ -208,6 +263,7 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     lowPower,
     locale,
     archiveLabel,
+    titleFontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   } = options
   const renderer = new WebGLRenderer({
     canvas,
@@ -226,9 +282,9 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
   const background = new Color(options.backgroundColor ?? 0xfbfcfd)
   scene.background = background
 
-  // A wider field of view makes depth changes legible instead of reading like
-  // an orthographic stack, while resize() keeps the same responsive framing.
-  const camera = new PerspectiveCamera(46, 1, 0.1, 48)
+  // A restrained perspective keeps the card readable while the moving camera
+  // and physical extraction path provide the depth cues.
+  const camera = new PerspectiveCamera(40, 1, 0.1, 64)
   // Keep the pale stock dimensional without clipping it to flat white. These
   // restrained lights also avoid the cost of shadows on low-end GPUs.
   const ambient = new AmbientLight(0xffffff, 0.68)
@@ -237,7 +293,14 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
   keyLight.position.set(-4.5, 6, 7)
   const fillLight = new DirectionalLight(0xe8ebef, 0.38)
   fillLight.position.set(5, -1.5, 4)
-  scene.add(ambient, hemisphere, keyLight, fillLight)
+  scene.add(
+    ambient,
+    hemisphere,
+    keyLight,
+    keyLight.target,
+    fillLight,
+    fillLight.target,
+  )
 
   // Keep every case resident in one instanced draw call. The article count is
   // small enough that recycling a short pool costs more visually (instances
@@ -256,7 +319,19 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
   cases.frustumCulled = false
   scene.add(cases)
 
-  const labelGeometry = new PlaneGeometry(caseWidth * 0.94, caseHeight * 0.955)
+  // The fixed shelf remains one instanced draw call. Only the outgoing and
+  // incoming cases become dedicated meshes while they leave their slots; this
+  // keeps depth ordering physical without rebuilding the whole shelf per frame.
+  const activeCases = [0, 1].map(() => {
+    const mesh = new Mesh(geometry, material)
+    mesh.matrixAutoUpdate = false
+    mesh.visible = false
+    mesh.frustumCulled = false
+    scene.add(mesh)
+    return mesh
+  })
+
+  const labelGeometry = new PlaneGeometry(labelWidth, labelHeight)
   const labels = [createLabel(), createLabel()]
   const labelMeshes = labels.map((label) => {
     const labelMaterial = new MeshStandardMaterial({
@@ -274,11 +349,34 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
   })
 
   const poseObject = new Object3D()
-  const labelOffset = new Matrix4().makeTranslation(0, 0, caseDepth / 2 + 0.004)
+  const shelfRotationObject = new Object3D()
+  const displayRotationObject = new Object3D()
+  const facingObject = new Object3D()
+  displayRotationObject.rotation.set(-0.16, 0.4, -0.1, 'XYZ')
+  const labelOffset = new Matrix4().makeTranslation(0, 0, caseDepth / 2 + 0.008)
+  const hiddenMatrix = new Matrix4().makeScale(0, 0, 0)
   const projectedPoint = new Vector3()
+  const cameraTarget = new Vector3()
+  const restMatrices = articles.map((_, articleIndex) => {
+    const variance = indexVariance(articleIndex)
+    poseObject.position.set(
+      articleIndex * spinePitch,
+      shelfY + variance * 0.025,
+      shelfZ,
+    )
+    poseObject.rotation.set(
+      0,
+      Math.PI / 2 + variance * 0.018,
+      variance * 0.038,
+      'XYZ',
+    )
+    poseObject.scale.set(1, 1, 1)
+    poseObject.updateMatrix()
+    return poseObject.matrix.clone()
+  })
   const poseResult: CasePose = {
     matrix: poseObject.matrix,
-    openness: 0,
+    faceVisibility: 0,
   }
   let currentFrame: ArchiveSceneFrame = {
     position: 0,
@@ -288,42 +386,117 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
   }
   let width = 1
   let height = 1
+  let cameraDistance = 10
+  let cardTitleFontSize = 27
+  let cardTitleAlignment: 'left' | 'center' = 'center'
+  let hiddenIndexA = -1
+  let hiddenIndexB = -1
+
+  restMatrices.forEach((matrix, articleIndex) => {
+    cases.setMatrixAt(articleIndex, matrix)
+  })
+  cases.instanceMatrix.needsUpdate = true
+
+  const extractionForDistance = (distance: number) =>
+    distance >= 0.64 ? 0 : 1 - smootherstep(0, 0.64, distance)
+
+  const updateCamera = (frame: ArchiveSceneFrame) => {
+    const lower = clamp(Math.floor(frame.position), 0, articles.length - 1)
+    const upper = clamp(Math.ceil(frame.position), 0, articles.length - 1)
+    const fraction = clamp(frame.position - lower, 0, 1)
+    const handoff = lower === upper
+      ? 0
+      : smootherstep(0.38, 0.62, fraction)
+    const lowerExtraction = extractionForDistance(Math.abs(lower - frame.position))
+    const upperExtraction = extractionForDistance(Math.abs(upper - frame.position))
+    const slide = mix(
+      smootherstep(0, 0.72, lowerExtraction),
+      smootherstep(0, 0.72, upperExtraction),
+      handoff,
+    )
+    const turn = mix(
+      smootherstep(turnStart, 1, lowerExtraction),
+      smootherstep(turnStart, 1, upperExtraction),
+      handoff,
+    )
+    const lift = mix(
+      smootherstep(0.42, 1, lowerExtraction),
+      smootherstep(0.42, 1, upperExtraction),
+      handoff,
+    )
+    const focusX = mix(lower, upper, handoff) * spinePitch - 0.1 * turn
+    const focusBaseY = mix(
+      shelfY + indexVariance(lower) * 0.025,
+      shelfY + indexVariance(upper) * 0.025,
+      handoff,
+    )
+    const focusY = focusBaseY + 0.56 * lift
+    const focusZ = shelfZ + pullDistance * slide
+    const selected = smootherstep(0, 1, frame.selectionProgress)
+    const shoulder = camera.aspect < 0.72 ? 0.18 : 0.3
+    const browsingCameraX = focusX + shoulder
+    const browsingCameraY = 0.65 + 0.12 * lift
+    const browsingCameraZ = shelfZ
+      + cameraDistance
+      + pullDistance * cameraFollowRatio * slide
+    const alignedCameraZ = focusZ + cameraDistance - alignedCameraOffset
+
+    cameraTarget.set(focusX, focusY, focusZ)
+    camera.position.set(
+      mix(browsingCameraX, focusX, selected),
+      mix(browsingCameraY, focusY, selected),
+      mix(browsingCameraZ, alignedCameraZ, selected),
+    )
+    camera.lookAt(cameraTarget)
+
+    keyLight.position.set(focusX - 4.5, focusY + 6, focusZ + 7)
+    keyLight.target.position.copy(cameraTarget)
+    fillLight.position.set(focusX + 5, focusY - 1.5, focusZ + 4)
+    fillLight.target.position.copy(cameraTarget)
+  }
 
   const getPose = (articleIndex: number, frame: ArchiveSceneFrame): CasePose => {
-    const offset = articleIndex - frame.position
-    const openness = 1 - smoothstep(0.06, 0.56, Math.abs(offset))
+    const distance = Math.abs(articleIndex - frame.position)
+    const extraction = extractionForDistance(distance)
+    const slide = smootherstep(0, 0.72, extraction)
+    const turn = smootherstep(turnStart, 1, extraction)
+    const lift = smootherstep(0.42, 1, extraction)
     const presented = articleIndex === frame.selectedIndex
-    const selected = presented
-      ? frame.selectionProgress
-      : 0
-    const hover = presented && frame.hovered && selected === 0
-      ? 1
-      : 0
-
-    const restingRoll = indexVariance(articleIndex) * 0.045
-    const x = offset * spinePitch
-    const y = mix(-0.2, 0.52, openness)
-    // The nearest visual case owns the foreground while it is being presented.
-    // Its lift grows as it turns edge-on, preventing adjacent cases from
-    // intersecting its face during fractional trackpad/drag positions.
-    const presentationLift = presented ? 0.15 + (1 - openness) * 3 : 0
-    const selectionDepth = smoothstep(0, 0.12, selected) * 1.15
-    const z = mix(-1.35, 1.55, openness)
-      + presentationLift
-      + selectionDepth
-      + hover * 0.12
-    const pitch = mix(0, -0.105, openness) * (1 - selected)
-    const yaw = mix(Math.PI / 2, -0.12, openness) * (1 - selected)
-    const roll = mix(restingRoll, -0.145, openness) * (1 - selected)
+    const selected = presented ? frame.selectionProgress : 0
+    const align = smootherstep(0, 0.62, selected)
+    const flatten = smootherstep(0.62, 1, selected)
+    const hover = presented && frame.hovered && selected === 0 ? 1 : 0
+    const variance = indexVariance(articleIndex)
     const scale = 1 + hover * 0.012
 
-    poseObject.position.set(x, mix(y, 0.18, selected), z)
-    poseObject.rotation.set(pitch, yaw, roll, 'XYZ')
-    poseObject.scale.set(scale, scale, mix(scale, 0.045, selected))
+    poseObject.position.set(
+      articleIndex * spinePitch - 0.1 * turn,
+      shelfY + variance * 0.025 + 0.56 * lift,
+      shelfZ + pullDistance * slide + hover * 0.1,
+    )
+    shelfRotationObject.rotation.set(
+      0,
+      Math.PI / 2 + variance * 0.018,
+      variance * 0.038,
+      'XYZ',
+    )
+    poseObject.quaternion.slerpQuaternions(
+      shelfRotationObject.quaternion,
+      displayRotationObject.quaternion,
+      turn,
+    )
+
+    if (align > 0) {
+      facingObject.position.copy(poseObject.position)
+      facingObject.lookAt(camera.position)
+      poseObject.quaternion.slerp(facingObject.quaternion, align)
+    }
+
+    poseObject.scale.set(scale, scale, mix(scale, 0.045, flatten))
     poseObject.updateMatrix()
 
     poseResult.matrix = poseObject.matrix
-    poseResult.openness = openness
+    poseResult.faceVisibility = Math.max(turn, align)
     return poseResult
   }
 
@@ -340,7 +513,7 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     }
 
     const pose = getPose(articleIndex, frame)
-    if (pose.openness < 0.025 && frame.selectionProgress === 0) {
+    if (pose.faceVisibility < 0.025 && frame.selectionProgress === 0) {
       mesh.visible = false
       return
     }
@@ -352,10 +525,92 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
       articles.length,
       locale,
       archiveLabel,
+      titleFontFamily,
+      cardTitleFontSize,
+      cardTitleAlignment,
     )
     mesh.matrix.copy(pose.matrix).multiply(labelOffset)
-    mesh.renderOrder = articleIndex === frame.selectedIndex ? 2 : 1
     mesh.visible = true
+  }
+
+  const syncActiveShelfCases = (indexA: number, indexB: number) => {
+    let changed = false
+    const hiddenAIsActive = hiddenIndexA >= 0
+      && (hiddenIndexA === indexA || hiddenIndexA === indexB)
+    const hiddenBIsActive = hiddenIndexB >= 0
+      && (hiddenIndexB === indexA || hiddenIndexB === indexB)
+
+    if (hiddenIndexA >= 0 && !hiddenAIsActive) {
+      cases.setMatrixAt(hiddenIndexA, restMatrices[hiddenIndexA])
+      changed = true
+    }
+    if (
+      hiddenIndexB >= 0
+      && hiddenIndexB !== hiddenIndexA
+      && !hiddenBIsActive
+    ) {
+      cases.setMatrixAt(hiddenIndexB, restMatrices[hiddenIndexB])
+      changed = true
+    }
+
+    const indexAWasHidden = indexA === hiddenIndexA || indexA === hiddenIndexB
+    const indexBWasHidden = indexB === hiddenIndexA || indexB === hiddenIndexB
+    if (indexA >= 0 && !indexAWasHidden) {
+      cases.setMatrixAt(indexA, hiddenMatrix)
+      changed = true
+    }
+    if (indexB >= 0 && indexB !== indexA && !indexBWasHidden) {
+      cases.setMatrixAt(indexB, hiddenMatrix)
+      changed = true
+    }
+
+    hiddenIndexA = indexA
+    hiddenIndexB = indexB
+    if (changed) cases.instanceMatrix.needsUpdate = true
+  }
+
+  const setActiveCase = (
+    mesh: Mesh,
+    articleIndex: number,
+    frame: ArchiveSceneFrame,
+  ) => {
+    if (articleIndex < 0 || articleIndex >= articles.length) {
+      mesh.visible = false
+      return
+    }
+
+    const pose = getPose(articleIndex, frame)
+    mesh.matrix.copy(pose.matrix)
+    mesh.visible = true
+  }
+
+  const setActiveLabels = (
+    lower: number,
+    upper: number,
+    frame: ArchiveSceneFrame,
+  ) => {
+    const lowerSlot = labels[0].articleIndex === lower
+      ? 0
+      : labels[1].articleIndex === lower
+        ? 1
+        : 0
+
+    if (upper === lower) {
+      const hiddenSlot = lowerSlot === 0 ? 1 : 0
+      setLabelMatrix(labelMeshes[lowerSlot], labels[lowerSlot], lower, frame)
+      labelMeshes[hiddenSlot].visible = false
+      return
+    }
+
+    let upperSlot = labels[0].articleIndex === upper
+      ? 0
+      : labels[1].articleIndex === upper
+        ? 1
+        : lowerSlot === 0 ? 1 : 0
+    if (upperSlot === lowerSlot) upperSlot = lowerSlot === 0 ? 1 : 0
+
+    setLabelMatrix(labelMeshes[lowerSlot], labels[lowerSlot], lower, frame)
+    setLabelMatrix(labelMeshes[upperSlot], labels[upperSlot], upper, frame)
   }
 
   const resize = () => {
@@ -367,72 +622,99 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     height = nextHeight
     const maxRatio = lowPower ? 1 : 1.25
     const pixelBudgetRatio = Math.sqrt(1_500_000 / (width * height))
-    const ratio = clamp(Math.min(window.devicePixelRatio || 1, maxRatio, pixelBudgetRatio), 0.75, maxRatio)
+    const ratio = Math.min(
+      window.devicePixelRatio || 1,
+      maxRatio,
+      pixelBudgetRatio,
+    )
     renderer.setPixelRatio(ratio)
     renderer.setSize(width, height, false)
 
     camera.aspect = width / height
+    const articleTitleWidth = Math.max(1, Math.min(width - 32, 704))
+    const articleTitleFontSize = width <= 640
+      ? 30.4
+      : clamp(27.52 + width * 0.0115, 32, 44)
+    cardTitleFontSize = clamp(
+      306 * articleTitleFontSize / articleTitleWidth,
+      21,
+      30,
+    )
+    cardTitleAlignment = width <= 640 ? 'left' : 'center'
     const compactLandscape = height < 500 && camera.aspect > 1.5
     const visibleHeight = compactLandscape
-      ? 8.4
+      ? 7.9
       : camera.aspect < 0.62
-        ? 10.2
+        ? 9.6
         : camera.aspect < 0.9
-          ? 9.6
+          ? 8.9
           : camera.aspect > 1.75
-            ? 8.2
-            : 8.8
-    const distance = (visibleHeight / 2) / Math.tan((camera.fov * Math.PI) / 360)
-    camera.position.set(0, 0.15, distance)
-    camera.lookAt(0, 0.08, 0)
+            ? 7.5
+            : 8.1
+    const halfFovTangent = Math.tan((camera.fov * Math.PI) / 360)
+    const verticalDistance = (visibleHeight / 2) / halfFovTangent
+    const safeGutter = Math.min(24, Math.max(12, width * 0.04))
+    const usableWidth = Math.max(0.5, 1 - safeGutter * 2 / width)
+    const presentedWidth = caseWidth * Math.abs(Math.cos(0.4))
+      + caseHeight * Math.abs(Math.sin(-0.1))
+      + caseDepth * Math.abs(Math.sin(0.4))
+    const requiredVisibleWidth = presentedWidth / usableWidth
+    const horizontalDistance = requiredVisibleWidth
+      / Math.max(0.001, 2 * halfFovTangent * camera.aspect)
+      + alignedCameraOffset
+    cameraDistance = Math.max(verticalDistance, horizontalDistance)
     camera.updateProjectionMatrix()
+    updateCamera(currentFrame)
   }
 
   const draw = (frame: ArchiveSceneFrame) => {
     currentFrame = frame
-
-    for (let articleIndex = 0; articleIndex < instanceCount; articleIndex++) {
-      const pose = getPose(articleIndex, frame)
-      cases.setMatrixAt(articleIndex, pose.matrix)
-    }
-    cases.instanceMatrix.needsUpdate = true
-
+    updateCamera(frame)
     const lower = clamp(Math.floor(frame.position), 0, articles.length - 1)
     const upper = clamp(Math.ceil(frame.position), 0, articles.length - 1)
-    setLabelMatrix(labelMeshes[0], labels[0], lower, frame)
-    if (upper === lower) {
-      labelMeshes[1].visible = false
-    } else {
-      setLabelMatrix(labelMeshes[1], labels[1], upper, frame)
-    }
+    const secondIndex = upper === lower ? -1 : upper
+    syncActiveShelfCases(lower, secondIndex)
+    setActiveCase(activeCases[0], lower, frame)
+    setActiveCase(activeCases[1], secondIndex, frame)
+
+    setActiveLabels(lower, upper, frame)
 
     renderer.render(scene, camera)
   }
 
-  const getActiveRect = () => {
-    const pose = getPose(currentFrame.selectedIndex, currentFrame)
-    const corners = [
-      [-caseWidth / 2, -caseHeight / 2],
-      [caseWidth / 2, -caseHeight / 2],
-      [caseWidth / 2, caseHeight / 2],
-      [-caseWidth / 2, caseHeight / 2],
-    ] as const
+  const projectBounds = (
+    matrix: Matrix4,
+    minLocalX: number,
+    maxLocalX: number,
+    minLocalY: number,
+    maxLocalY: number,
+    minLocalZ: number,
+    maxLocalZ: number,
+  ) => {
     let minX = Number.POSITIVE_INFINITY
     let minY = Number.POSITIVE_INFINITY
     let maxX = Number.NEGATIVE_INFINITY
     let maxY = Number.NEGATIVE_INFINITY
+    const zSteps = minLocalZ === maxLocalZ ? 1 : 2
 
-    for (const [x, y] of corners) {
-      projectedPoint
-        .set(x, y, caseDepth / 2)
-        .applyMatrix4(pose.matrix)
-        .project(camera)
-      const screenX = (projectedPoint.x * 0.5 + 0.5) * width
-      const screenY = (-projectedPoint.y * 0.5 + 0.5) * height
-      minX = Math.min(minX, screenX)
-      minY = Math.min(minY, screenY)
-      maxX = Math.max(maxX, screenX)
-      maxY = Math.max(maxY, screenY)
+    for (let xStep = 0; xStep < 2; xStep++) {
+      const localX = xStep === 0 ? minLocalX : maxLocalX
+      for (let yStep = 0; yStep < 2; yStep++) {
+        const localY = yStep === 0 ? minLocalY : maxLocalY
+        for (let zStep = 0; zStep < zSteps; zStep++) {
+          const localZ = zStep === 0 ? minLocalZ : maxLocalZ
+          projectedPoint
+            .set(localX, localY, localZ)
+            .applyMatrix4(matrix)
+            .project(camera)
+          const screenX = (projectedPoint.x * 0.5 + 0.5) * width
+          const screenY = (-projectedPoint.y * 0.5 + 0.5) * height
+          minX = Math.min(minX, screenX)
+          minY = Math.min(minY, screenY)
+          maxX = Math.max(maxX, screenX)
+          maxY = Math.max(maxY, screenY)
+        }
+      }
     }
 
     const hostRect = host.getBoundingClientRect()
@@ -444,12 +726,53 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     )
   }
 
+  const getActiveRects = (): ArchiveSceneRects => {
+    const pose = getPose(currentFrame.selectedIndex, currentFrame)
+    const surfaceRect = projectBounds(
+      pose.matrix,
+      -caseWidth / 2,
+      caseWidth / 2,
+      -caseHeight / 2,
+      caseHeight / 2,
+      -caseDepth / 2,
+      caseDepth / 2,
+    )
+    const activeLabel = labels[1].articleIndex === currentFrame.selectedIndex
+      ? labels[1]
+      : labels[0]
+    const bounds = activeLabel.titleBounds
+    const titleLeft = (bounds.left / activeLabel.canvas.width - 0.5) * labelWidth
+    const titleRight = (
+      (bounds.left + bounds.width) / activeLabel.canvas.width - 0.5
+    ) * labelWidth
+    const titleTop = (0.5 - bounds.top / activeLabel.canvas.height) * labelHeight
+    const titleBottom = (
+      0.5 - (bounds.top + bounds.height) / activeLabel.canvas.height
+    ) * labelHeight
+    const titleRect = projectBounds(
+      pose.matrix,
+      titleLeft,
+      titleRight,
+      titleBottom,
+      titleTop,
+      caseDepth / 2 + 0.008,
+      caseDepth / 2 + 0.008,
+    )
+
+    return { surfaceRect, titleRect }
+  }
+
   resize()
   draw(currentFrame)
 
   return {
     draw,
-    getActiveRect,
+    getActiveRects,
+    refreshTypography() {
+      labels.forEach((label) => {
+        label.paintKey = ''
+      })
+    },
     resize() {
       width = 0
       height = 0
@@ -470,6 +793,7 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
       })
       scene.clear()
       renderer.dispose()
+      context.getExtension('WEBGL_lose_context')?.loseContext()
     },
   }
 }

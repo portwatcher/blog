@@ -85,7 +85,11 @@
 </template>
 
 <script setup lang="ts">
-import type { ArchiveSceneEngine } from '~/lib/archive-scene'
+import type {
+  ArchiveSceneEngine,
+  ArchiveSceneFrame,
+  ArchiveSceneRects,
+} from '~/lib/archive-scene'
 
 const props = withDefaults(defineProps<{
   articles: Article[]
@@ -101,13 +105,13 @@ const emit = defineEmits<{
     article: Article,
     index: number,
     controller: {
-      focusForOpen: () => Promise<DOMRect>
+      focusForOpen: () => Promise<ArchiveSceneRects>
       finishReturnPose: () => Promise<void>
     },
   ]
   mode: [mode: 'webgl' | 'fallback']
   ready: [controller: {
-    getActiveRect: () => DOMRect
+    getActiveRects: () => ArchiveSceneRects
     finishReturnPose: () => Promise<void>
   }]
 }>()
@@ -217,19 +221,21 @@ const springStiffness = 190
 const springDamping = 20
 const springRestDistance = 0.0006
 const springRestSpeed = 0.006
-
-const easeOutQuint = (value: number) => 1 - Math.pow(1 - value, 5)
+const sceneFrame: ArchiveSceneFrame = {
+  position: 0,
+  selectedIndex: 0,
+  selectionProgress: 0,
+  hovered: false,
+}
 
 const draw = () => {
-  const presentedIndex = opening.value
+  sceneFrame.position = displayPosition
+  sceneFrame.selectedIndex = opening.value
     ? currentIndex.value
     : clampIndex(displayPosition)
-  engine?.draw({
-    position: displayPosition,
-    selectedIndex: presentedIndex,
-    selectionProgress,
-    hovered,
-  })
+  sceneFrame.selectionProgress = selectionProgress
+  sceneFrame.hovered = hovered
+  engine?.draw(sceneFrame)
 }
 
 const updateHitTarget = () => {
@@ -238,7 +244,7 @@ const updateHitTarget = () => {
     return
   }
 
-  const rect = engine.getActiveRect()
+  const rect = engine.getActiveRects().surfaceRect
   const stageRect = stage.value.getBoundingClientRect()
   hitStyle.value = {
     width: `${Math.max(44, rect.width)}px`,
@@ -282,7 +288,7 @@ const frame = (now: number) => {
     const elapsed = now - selectionTween.startedAt
     const progress = Math.min(1, elapsed / selectionTween.duration)
     selectionProgress = selectionTween.from
-      + (selectionTween.to - selectionTween.from) * easeOutQuint(progress)
+      + (selectionTween.to - selectionTween.from) * progress
     if (progress === 1) {
       selectionProgress = selectionTween.to
       const resolve = selectionTween.resolve
@@ -661,15 +667,15 @@ const focusForOpen = async () => {
   springVelocity = 0
   syncWindowScroll(scrollTopForIndex(currentIndex.value))
   draw()
-  await animateSelection(1, 230)
+  await animateSelection(1, 300)
   if (disposed || !engine) throw new Error('Archive scene was disposed during transition')
   draw()
-  return engine.getActiveRect()
+  return engine.getActiveRects()
 }
 
 const finishReturnPose = async () => {
   if (!engine) return
-  await animateSelection(0, 280)
+  await animateSelection(0, 320)
   if (disposed || !engine) return
   opening.value = false
   targetPosition = currentIndex.value
@@ -683,12 +689,15 @@ const finishReturnPose = async () => {
   hitTarget.value?.focus({ preventScroll: true })
 }
 
-const getActiveRect = () => engine?.getActiveRect() || new DOMRect()
+const getActiveRects = (): ArchiveSceneRects => engine?.getActiveRects() || {
+  surfaceRect: new DOMRect(),
+  titleRect: new DOMRect(),
+}
 
 defineExpose({
   focusForOpen,
   finishReturnPose,
-  getActiveRect,
+  getActiveRects,
 })
 
 const useFallback = (reason: string) => {
@@ -778,6 +787,7 @@ onMounted(async () => {
       return
     }
 
+    const stageStyles = getComputedStyle(stage.value)
     engine = createArchiveScene({
       canvas: canvas.value,
       context,
@@ -786,10 +796,17 @@ onMounted(async () => {
       lowPower,
       locale: locale.value,
       archiveLabel: t('archive'),
+      titleFontFamily: stageStyles.getPropertyValue('--font-serif').trim()
+        || '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
       backgroundColor: cssColorToNumber(
-        getComputedStyle(stage.value).backgroundColor,
+        stageStyles.backgroundColor,
         0xfbfcfd,
       ),
+    })
+    void document.fonts.ready.then(() => {
+      if (disposed || !engine) return
+      engine.refreshTypography()
+      draw()
     })
   } catch (error) {
     context.getExtension('WEBGL_lose_context')?.loseContext()
@@ -842,7 +859,7 @@ onMounted(async () => {
   draw()
   updateHitTarget()
   emit('ready', {
-    getActiveRect,
+    getActiveRects,
     finishReturnPose,
   })
 })
