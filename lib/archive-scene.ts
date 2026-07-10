@@ -79,6 +79,7 @@ const pullDistance = 3.3
 const turnStart = 0.58
 const cameraDepthOffset = pullDistance * 0.42
 const alignedCameraOffset = pullDistance - cameraDepthOffset
+const cameraY = 0.72
 const labelWidth = caseWidth * 0.94
 const labelHeight = caseHeight * 0.955
 
@@ -435,15 +436,13 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     const selected = smootherstep(0, 1, frame.selectionProgress)
     const shoulder = camera.aspect < 0.72 ? 0.18 : 0.3
     const browsingCameraX = focusX + shoulder
-    const browsingCameraY = 0.65 + 0.12 * lift
 
     cameraTarget.set(focusX, focusY, focusZ)
     camera.position.set(
       mix(browsingCameraX, focusX, selected),
-      mix(browsingCameraY, focusY, selected),
-      // Keep depth fixed while browsing and opening. The camera can track the
-      // active case in X/Y and look toward its extracted Z position, but it
-      // never dollies toward or away from the shelf.
+      // The camera translates along X only. Y/Z stay locked while its look-at
+      // target follows the case's physical extraction path.
+      cameraY,
       shelfZ + cameraDistance + cameraDepthOffset,
     )
     camera.lookAt(cameraTarget)
