@@ -5,7 +5,11 @@
     :lang="languageBase(activeLang)"
   >
     <header class="article-header">
-      <h1 class="title">{{ article.title }}</h1>
+      <h1
+        ref="articleTitle"
+        class="title"
+        tabindex="-1"
+      >{{ article.title }}</h1>
 
       <nav
         v-if="languageTabs.length > 1"
@@ -66,13 +70,18 @@ definePageMeta({
 
 const route = useRoute()
 const config = useRuntimeConfig()
+const archiveTransition = useArchiveTransition()
 const password = ref<string | null>(null)
 const article = ref<Article | null>(null)
+const articleTitle = ref<HTMLElement | null>(null)
 const languageLabels: Record<string, string> = {
   zh: '中文',
   en: 'English',
   ja: '日本語',
 }
+
+const getRouteTitle = (value: unknown) =>
+  String(Array.isArray(value) ? value[0] || '' : value || '')
 
 const configuredTranslationLanguages = computed(() =>
   String(config.public.translationLanguages || 'zh,en,ja')
@@ -189,7 +198,23 @@ const loadArticle = async () => {
   article.value = articles[0] as Article | null
 }
 
-await loadArticle()
+const articleRequestKey = `article:${String(route.params.title)}:${currentLang.value || 'original'}`
+const { data:initialArticle } = await useAsyncData<Article | null>(articleRequestKey, async () => {
+  if (import.meta.client) {
+    const primed = await takePrimedArchiveArticle(
+      String(route.params.title),
+      currentLang.value || undefined,
+    )
+    if (primed) return primed
+  }
+
+  const articles = await $fetch<Article[]>('/api/articles', {
+    method: 'GET',
+    query: getArticleQuery(),
+  })
+  return articles[0] || null
+})
+article.value = initialArticle.value
 
 const languageTabs = computed(() =>
   availableLanguageCodes.value.map((lang) => ({
@@ -200,8 +225,37 @@ const languageTabs = computed(() =>
   })),
 )
 
-onMounted(() => {
+onMounted(async () => {
   void applyMarkdownImageLayout()
+  await nextTick()
+  const routeTitle = getRouteTitle(route.params.title)
+  const revealed = await archiveTransition.revealArticle(routeTitle)
+  if (
+    revealed
+    && getRouteTitle(route.params.title) === routeTitle
+    && archiveTransition.state.value.phase === 'article'
+  ) {
+    articleTitle.value?.focus({ preventScroll: true })
+  }
+})
+
+onBeforeRouteLeave(async (to) => {
+  const routeTitle = getRouteTitle(route.params.title)
+  if (to.path === '/archive') {
+    await archiveTransition.coverArticleForReturn(routeTitle)
+    return
+  }
+
+  const destinationTitle = getRouteTitle(to.params.title)
+  if (!destinationTitle || destinationTitle !== routeTitle) {
+    await archiveTransition.cancel()
+  }
+})
+
+onBeforeRouteUpdate(async (to) => {
+  if (getRouteTitle(to.params.title) !== getRouteTitle(route.params.title)) {
+    await archiveTransition.cancel()
+  }
 })
 
 useSeoMeta({

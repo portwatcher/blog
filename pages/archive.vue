@@ -1,44 +1,156 @@
 <template>
-  <div>
-    <div
-      v-for="[year, articles] in yearGroups"
-      :key="year"
-    >
-      <h1>{{ year }}</h1>
-      <SummaryTitleList :articles="articles">
-      </SummaryTitleList>
+  <section
+    class="archive"
+    :class="`archive--${sceneMode}`"
+    aria-labelledby="archive-title"
+  >
+    <h1 id="archive-title" class="archive__title">{{ t('archive') }}</h1>
+
+    <div v-if="articles.length" class="archive__track" :style="trackStyle">
+      <ArchiveScene
+        :articles="articles"
+        :initial-index="initialIndex"
+        :returning="returning"
+        @activate="openArticle"
+        @mode="setSceneMode"
+        @ready="onSceneReady"
+      />
+
+      <ol
+        class="archive__fallback"
+        :aria-label="t('archiveScene.articleList')"
+        :aria-hidden="sceneMode === 'webgl' ? 'true' : undefined"
+        :inert="sceneMode === 'webgl'"
+      >
+        <li
+          v-for="(article, index) in articles"
+          :key="`${getArticleRouteTitle(article)}-${article.date}`"
+          class="archive__fallback-item"
+        >
+          <NuxtLink
+            class="archive__fallback-link"
+            :to="articleLocation(article)"
+          >
+            <span class="archive__fallback-index">
+              {{ String(index + 1).padStart(2, '0') }} / {{ String(articles.length).padStart(2, '0') }}
+            </span>
+            <strong>{{ article.title }}</strong>
+            <time :datetime="article.date">{{ formatDate(article.date) }}</time>
+          </NuxtLink>
+        </li>
+      </ol>
     </div>
-  </div>
+
+    <p v-else class="archive__empty">{{ t('archiveScene.empty') }}</p>
+  </section>
 </template>
 
 <script setup lang="ts">
 const config = useRuntimeConfig()
 const { locale, t } = useI18n()
+const router = useRouter()
+const archiveTransition = useArchiveTransition()
 
 const { data } = await useFetch<Article[]>('/api/articles', {
   query: computed(() => ({
-    only: ['title', 'date', '_dir'],
+    only: ['title', 'date', '_dir', 'originalTitle'],
     lang: locale.value,
   })),
 })
 
-const yearGroups = computed(() => {
-  const yearGroupMap: YearGroupMap = new Map()
+const articles = computed(() => data.value || [])
+const sceneMode = ref<'pending' | 'webgl' | 'fallback'>('pending')
 
-  data.value?.forEach((article) => {
-    const year = new Date(article.date).getFullYear()
-    if (isNaN(year)) {
-      return
-    }
-    if (!yearGroupMap.has(year)) {
-      yearGroupMap.set(year, [article])
-    } else {
-      yearGroupMap.get(year)?.push(article)
-    }
-  })
-
-  return Array.from(yearGroupMap.entries())
+const returning = computed(() =>
+  archiveTransition.state.value.phase === 'returning'
+  && Boolean(archiveTransition.state.value.record),
+)
+const initialIndex = computed(() => {
+  const index = returning.value
+    ? archiveTransition.state.value.record?.index
+    : 0
+  return Math.min(
+    Math.max(0, Number(index) || 0),
+    Math.max(0, articles.value.length - 1),
+  )
 })
+const trackStyle = computed(() => ({
+  '--archive-scroll-span': `${Math.max(0, articles.value.length - 1) * 144}px`,
+}))
+
+const articleLocation = (article: Article) => ({
+  name: 'articles-title',
+  params: { title: getArticleRouteTitle(article) },
+})
+
+const formatDate = (value: string) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+
+  return new Intl.DateTimeFormat(locale.value, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+  }).format(date)
+}
+
+const setSceneMode = async (mode: 'webgl' | 'fallback') => {
+  sceneMode.value = mode
+  if (mode === 'fallback' && returning.value) {
+    await archiveTransition.cancel()
+  }
+}
+
+const onSceneReady = async (controller: {
+  getActiveRect: () => DOMRect
+  finishReturnPose: () => Promise<void>
+}) => {
+  if (!returning.value) return
+
+  const rect = controller.getActiveRect()
+  const revealed = await archiveTransition.revealShelf(rect)
+  if (!revealed) return
+
+  await controller.finishReturnPose()
+  archiveTransition.completeReturn()
+}
+
+const openArticle = async (
+  article: Article,
+  index: number,
+  controller: {
+    focusForOpen: () => Promise<DOMRect>
+    finishReturnPose: () => Promise<void>
+  },
+) => {
+  const routeTitle = getArticleRouteTitle(article)
+  const destination = router.resolve(articleLocation(article)).fullPath
+  const record: ArchiveTransitionRecord = {
+    title: article.title,
+    routeTitle,
+    date: article.date,
+    index,
+    count: articles.value.length,
+  }
+
+  void primeArchiveArticle(routeTitle)
+  try {
+    void preloadRouteComponents(destination).catch(() => undefined)
+  } catch {
+    // Preloading is opportunistic; navigation remains fully functional without it.
+  }
+
+  let rect: DOMRect | undefined
+  try {
+    rect = await controller.focusForOpen()
+    await archiveTransition.coverFromShelf(record, rect)
+    await navigateTo(destination)
+  } catch (error) {
+    console.error('[archive] article transition failed', error)
+    await archiveTransition.cancel(rect)
+    await controller.finishReturnPose()
+  }
+}
 
 useSeoMeta({
   title: () => t('archive'),
@@ -47,12 +159,145 @@ useSeoMeta({
 })
 </script>
 
-
 <style scoped>
-h1 {
-  font-size: 2em;
-  margin: 4em 0;
+.archive {
   width: 100%;
-  text-align: center;
+  min-height: calc(100vh - var(--site-header-height, 47px));
+  min-height: calc(100svh - var(--site-header-height, 47px));
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.archive__title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  font-family: var(--font-sans);
+  white-space: nowrap;
+}
+
+.archive__track {
+  position: relative;
+  width: 100%;
+}
+
+.archive--webgl .archive__track {
+  min-height: calc(100vh + var(--archive-scroll-span, 0px));
+  min-height: calc(100svh + var(--archive-scroll-span, 0px));
+}
+
+.archive:not(.archive--webgl) :deep(.archive-scene) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.archive__fallback {
+  display: grid;
+  width: min(100%, 78rem);
+  margin: 0 auto;
+  padding: clamp(4rem, 10vw, 8rem) clamp(1rem, 4vw, 3rem);
+  box-sizing: border-box;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: clamp(1rem, 3vw, 2rem);
+  list-style: none;
+}
+
+.archive__fallback-item {
+  min-width: 0;
+  content-visibility: auto;
+  contain-intrinsic-size: 19rem 14rem;
+}
+
+.archive__fallback-link {
+  display: grid;
+  min-height: 17rem;
+  border: 1px solid var(--color-border);
+  padding: 1.25rem;
+  box-sizing: border-box;
+  background: var(--color-subtle);
+  color: var(--color-text);
+  grid-template-rows: auto 1fr auto;
+  gap: 1.5rem;
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.archive__fallback-link:hover {
+  background: var(--color-soft-border);
+  transform: translateY(-0.25rem);
+}
+
+.archive__fallback-link:focus-visible {
+  outline: 2px solid var(--color-heading);
+  outline-offset: 4px;
+}
+
+.archive__fallback-link strong {
+  align-self: center;
+  font-family: var(--font-sans);
+  font-size: clamp(1.25rem, 1rem + 1vw, 1.8rem);
+  font-weight: 650;
+  line-height: 1.22;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+.archive__fallback-index,
+.archive__fallback-link time {
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.archive--webgl .archive__fallback {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  margin: -1px;
+  padding: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.archive__empty {
+  display: grid;
+  min-height: calc(100vh - var(--site-header-height, 47px));
+  min-height: calc(100svh - var(--site-header-height, 47px));
+  margin: 0;
+  padding: 2rem;
+  box-sizing: border-box;
+  place-items: center;
+  color: var(--color-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .archive__fallback-link {
+    transition: none;
+  }
+
+  .archive__fallback-link:hover {
+    transform: none;
+  }
+}
+
+@media print {
+  .archive__fallback {
+    grid-template-columns: repeat(2, 1fr);
+    padding: 1rem 0;
+  }
+
+  .archive__fallback-link {
+    min-height: 10rem;
+  }
 }
 </style>
