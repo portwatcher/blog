@@ -77,8 +77,8 @@ const shelfY = -0.28
 const shelfZ = -1.3
 const pullDistance = 3.3
 const turnStart = 0.58
-const cameraFollowRatio = 0.42
-const alignedCameraOffset = pullDistance * (1 - cameraFollowRatio)
+const cameraDepthOffset = pullDistance * 0.42
+const alignedCameraOffset = pullDistance - cameraDepthOffset
 const labelWidth = caseWidth * 0.94
 const labelHeight = caseHeight * 0.955
 
@@ -436,16 +436,15 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     const shoulder = camera.aspect < 0.72 ? 0.18 : 0.3
     const browsingCameraX = focusX + shoulder
     const browsingCameraY = 0.65 + 0.12 * lift
-    const browsingCameraZ = shelfZ
-      + cameraDistance
-      + pullDistance * cameraFollowRatio * slide
-    const alignedCameraZ = focusZ + cameraDistance - alignedCameraOffset
 
     cameraTarget.set(focusX, focusY, focusZ)
     camera.position.set(
       mix(browsingCameraX, focusX, selected),
       mix(browsingCameraY, focusY, selected),
-      mix(browsingCameraZ, alignedCameraZ, selected),
+      // Keep depth fixed while browsing and opening. The camera can track the
+      // active case in X/Y and look toward its extracted Z position, but it
+      // never dollies toward or away from the shelf.
+      shelfZ + cameraDistance + cameraDepthOffset,
     )
     camera.lookAt(cameraTarget)
 
@@ -653,7 +652,7 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
             : 8.1
     const halfFovTangent = Math.tan((camera.fov * Math.PI) / 360)
     const verticalDistance = (visibleHeight / 2) / halfFovTangent
-    const safeGutter = Math.min(24, Math.max(12, width * 0.04))
+    const safeGutter = Math.min(32, Math.max(16, width * 0.06))
     const usableWidth = Math.max(0.5, 1 - safeGutter * 2 / width)
     const presentedWidth = caseWidth * Math.abs(Math.cos(0.4))
       + caseHeight * Math.abs(Math.sin(-0.1))

@@ -19,7 +19,25 @@
     @pointerup="onPointerEnd"
     @pointercancel="onPointerEnd"
     @lostpointercapture="onPointerEnd"
+    @pointerleave="setHovered(false)"
+    @touchstart.passive="onTouchStart"
+    @touchend.passive="onTouchEnd"
+    @touchcancel.passive="onTouchEnd"
   >
+    <div
+      ref="horizontalRail"
+      class="archive-scene__horizontal-rail"
+      aria-hidden="true"
+      @scroll.passive="onHorizontalRailScroll"
+      @scrollend="onHorizontalRailScrollEnd"
+      @click="activateFromSurface"
+    >
+      <div
+        ref="horizontalRailContent"
+        class="archive-scene__horizontal-rail-content"
+      ></div>
+    </div>
+
     <canvas
       ref="canvas"
       class="archive-scene__canvas"
@@ -43,8 +61,6 @@
       :aria-hidden="hitVisible && ready ? undefined : 'true'"
       :tabindex="hitVisible && ready && !opening ? 0 : -1"
       :disabled="opening || !ready || !hitVisible"
-      @pointerenter="setHovered(true)"
-      @pointerleave="setHovered(false)"
       @focus="setHovered(true)"
       @blur="setHovered(false)"
       @click="activateCurrent"
@@ -54,7 +70,7 @@
       class="archive-scene__arrow archive-scene__arrow--previous"
       type="button"
       :aria-label="t('archiveScene.previous')"
-      :disabled="!ready || currentIndex === 0 || opening || dragging || horizontalScrolling"
+      :disabled="!ready || currentIndex === 0 || opening || dragging || horizontalScrolling || verticalScrolling"
       @click="goToIndex(currentIndex - 1)"
     >
       <span aria-hidden="true">←</span>
@@ -64,7 +80,7 @@
       class="archive-scene__arrow archive-scene__arrow--next"
       type="button"
       :aria-label="t('archiveScene.next')"
-      :disabled="!ready || currentIndex === articles.length - 1 || opening || dragging || horizontalScrolling"
+      :disabled="!ready || currentIndex === articles.length - 1 || opening || dragging || horizontalScrolling || verticalScrolling"
       @click="goToIndex(currentIndex + 1)"
     >
       <span aria-hidden="true">→</span>
@@ -119,12 +135,15 @@ const emit = defineEmits<{
 const { locale, t } = useI18n()
 const stage = ref<HTMLElement | null>(null)
 const canvas = ref<HTMLCanvasElement | null>(null)
+const horizontalRail = ref<HTMLElement | null>(null)
+const horizontalRailContent = ref<HTMLElement | null>(null)
 const hitTarget = ref<HTMLButtonElement | null>(null)
 const ready = ref(false)
 const fallbackReason = ref('')
 const opening = ref(false)
 const dragging = ref(false)
 const horizontalScrolling = ref(false)
+const verticalScrolling = ref(false)
 const currentIndex = ref(0)
 const hitVisible = ref(false)
 const hitStyle = ref<Record<string, string>>({})
@@ -173,6 +192,9 @@ let animationFrame = 0
 let lastFrameTime = 0
 let trackTop = 0
 let trackSpan = 1
+let horizontalPitch = 220
+let lastHorizontalControlPosition = 0
+let lastVerticalControlPosition = 0
 let targetPosition = 0
 let displayPosition = 0
 let springVelocity = 0
@@ -180,16 +202,14 @@ let selectionProgress = 0
 let hovered = false
 let disposed = false
 let expectedProgrammaticScrollTop: number | null = null
+let expectedHorizontalScrollLeft: number | null = null
 let boundCanvas: HTMLCanvasElement | null = null
 let contextLostHandler: ((event: Event) => void) | null = null
 let suppressClickUntil = 0
-let wheelPixelsPerArticle = 0
-let wheelSession: {
-  axis: 'pending' | 'horizontal' | 'vertical'
-  lastTime: number
-  accumulatedX: number
-  accumulatedY: number
-} | null = null
+let activeHitRect: DOMRect | null = null
+let scrubAnchorIndex: number | null = null
+let touchContactActive = false
+let verticalSettlePending = false
 let dragGesture: {
   pointerId: number
   pointerType: string
@@ -213,14 +233,16 @@ const clampIndex = (value: number) =>
 const clampPosition = (value: number) =>
   Math.min(Math.max(0, value), Math.max(0, props.articles.length - 1))
 
-const switchThreshold = 0.8
-const wheelIdleMs = 160
+const switchThreshold = 0.82
+const gestureIdleMs = 420
+const scrollEndWatchdogMs = 1800
 const axisDominance = 1.25
-const wheelAxisDominance = 1.05
 const springStiffness = 190
 const springDamping = 20
 const springRestDistance = 0.0006
 const springRestSpeed = 0.006
+const supportsScrollEnd = (target: EventTarget) =>
+  'onscrollend' in (target as EventTarget & { onscrollend?: unknown })
 const sceneFrame: ArchiveSceneFrame = {
   position: 0,
   selectedIndex: 0,
@@ -240,11 +262,13 @@ const draw = () => {
 
 const updateHitTarget = () => {
   if (!engine || !stage.value || opening.value) {
+    activeHitRect = null
     hitVisible.value = false
     return
   }
 
   const rect = engine.getActiveRects().surfaceRect
+  activeHitRect = rect
   const stageRect = stage.value.getBoundingClientRect()
   hitStyle.value = {
     width: `${Math.max(44, rect.width)}px`,
@@ -264,7 +288,9 @@ const frame = (now: number) => {
   const delta = Math.min(0.032, Math.max(0.001, (now - (lastFrameTime || now)) / 1000))
   lastFrameTime = now
 
-  const directlyManipulated = dragging.value || horizontalScrolling.value
+  const directlyManipulated = dragging.value
+    || horizontalScrolling.value
+    || verticalScrolling.value
   if (!directlyManipulated) {
     const steps = Math.min(4, Math.max(1, Math.ceil(delta / (1 / 120))))
     const step = delta / steps
@@ -300,7 +326,12 @@ const frame = (now: number) => {
   draw()
   const moving = Math.abs(targetPosition - displayPosition) >= springRestDistance
     || Math.abs(springVelocity) >= springRestSpeed
-  if (selectionTween || dragging.value || horizontalScrolling.value) {
+  if (
+    selectionTween
+    || dragging.value
+    || horizontalScrolling.value
+    || verticalScrolling.value
+  ) {
     hitVisible.value = false
     if (moving || selectionTween) requestDraw()
   } else if (moving) {
@@ -318,11 +349,44 @@ const frame = (now: number) => {
   }
 }
 
+const pixelsPerArticle = () =>
+  Math.min(
+    380,
+    Math.max(190, (stage.value?.clientWidth || window.innerWidth) * 0.42),
+  )
+
+const syncHorizontalRail = (position: number) => {
+  if (!horizontalRail.value) return
+  const nextPosition = clampPosition(position)
+  const left = nextPosition * horizontalPitch
+  lastHorizontalControlPosition = nextPosition
+  if (Math.abs(horizontalRail.value.scrollLeft - left) <= 0.5) {
+    expectedHorizontalScrollLeft = null
+    return
+  }
+  expectedHorizontalScrollLeft = left
+  horizontalRail.value.scrollTo({ left, behavior: 'auto' })
+}
+
+const updateHorizontalRailMetrics = () => {
+  if (!stage.value || !horizontalRailContent.value) return
+  horizontalPitch = pixelsPerArticle()
+  const span = Math.max(0, props.articles.length - 1) * horizontalPitch
+  horizontalRailContent.value.style.width = `${stage.value.clientWidth + span}px`
+  if (!horizontalScrolling.value && !dragging.value) {
+    syncHorizontalRail(currentIndex.value)
+  }
+}
+
 const measureTrack = () => {
   if (!track) return
   const rect = track.getBoundingClientRect()
   trackTop = rect.top + window.scrollY
   trackSpan = Math.max(1, track.offsetHeight - window.innerHeight)
+  updateHorizontalRailMetrics()
+  if (!verticalScrolling.value) {
+    lastVerticalControlPosition = positionForScrollTop(window.scrollY)
+  }
 }
 
 const scrollTopForPosition = (position: number) => {
@@ -332,23 +396,37 @@ const scrollTopForPosition = (position: number) => {
 
 const scrollTopForIndex = (index: number) => scrollTopForPosition(clampIndex(index))
 
+const positionForScrollTop = (top: number) => {
+  const progress = (top - trackTop) / trackSpan
+  return clampPosition(progress * Math.max(0, props.articles.length - 1))
+}
+
 const syncWindowScroll = (top: number) => {
+  lastVerticalControlPosition = positionForScrollTop(top)
+  if (Math.abs(window.scrollY - top) <= 0.5) {
+    expectedProgrammaticScrollTop = null
+    return
+  }
   expectedProgrammaticScrollTop = top
   window.scrollTo({ top, behavior: 'auto' })
 }
 
-const updateCommittedIndex = (position: number) => {
-  let nextIndex = currentIndex.value
-  const lastIndex = Math.max(0, props.articles.length - 1)
+const releasedIndex = (anchorIndex: number, position: number) => {
+  const delta = position - anchorIndex
+  const magnitude = Math.abs(delta)
+  if (magnitude < switchThreshold) return clampIndex(anchorIndex)
 
-  while (nextIndex < lastIndex && position - nextIndex >= switchThreshold) {
-    nextIndex++
-  }
-  while (nextIndex > 0 && position - nextIndex <= -switchThreshold) {
-    nextIndex--
-  }
+  const steps = 1 + Math.floor(Math.max(0, magnitude - switchThreshold))
+  return clampIndex(anchorIndex + Math.sign(delta) * steps)
+}
 
-  if (nextIndex !== currentIndex.value) currentIndex.value = nextIndex
+const beginScrub = () => {
+  if (scrubAnchorIndex === null) scrubAnchorIndex = currentIndex.value
+  targetPosition = displayPosition
+  springVelocity = 0
+  lastFrameTime = 0
+  hovered = false
+  hitVisible.value = false
 }
 
 const settleToCommitted = () => {
@@ -356,25 +434,38 @@ const settleToCommitted = () => {
 
   window.clearTimeout(scrollTimer)
   window.clearTimeout(horizontalScrollTimer)
-  wheelSession = null
-  wheelPixelsPerArticle = 0
+  const nextIndex = releasedIndex(
+    scrubAnchorIndex ?? currentIndex.value,
+    displayPosition,
+  )
+  scrubAnchorIndex = null
+  verticalSettlePending = false
   dragging.value = false
   horizontalScrolling.value = false
-  targetPosition = currentIndex.value
-  springVelocity = Math.min(1.1, Math.max(-1.1, springVelocity * 0.15))
+  verticalScrolling.value = false
+  currentIndex.value = nextIndex
+  targetPosition = nextIndex
+  springVelocity = 0
   lastFrameTime = 0
-  syncWindowScroll(scrollTopForIndex(currentIndex.value))
+  syncWindowScroll(scrollTopForIndex(nextIndex))
+  syncHorizontalRail(nextIndex)
   requestDraw()
 }
 
 const goToIndex = (index: number) => {
   if (!ready.value || opening.value) return
   const nextIndex = clampIndex(index)
+  scrubAnchorIndex = null
+  verticalSettlePending = false
+  dragging.value = false
+  horizontalScrolling.value = false
+  verticalScrolling.value = false
   currentIndex.value = nextIndex
   targetPosition = nextIndex
   springVelocity = 0
   lastFrameTime = 0
   syncWindowScroll(scrollTopForIndex(nextIndex))
+  syncHorizontalRail(nextIndex)
   requestDraw()
 }
 
@@ -384,30 +475,39 @@ const settleScroll = () => {
     || !ready.value
     || dragging.value
     || horizontalScrolling.value
+    || !verticalScrolling.value
   ) return
+  if (touchContactActive) {
+    verticalSettlePending = true
+    return
+  }
   settleToCommitted()
 }
 
 const onScroll = () => {
   if (!ready.value || opening.value || dragging.value || horizontalScrolling.value) return
+  const nativePosition = positionForScrollTop(window.scrollY)
   if (expectedProgrammaticScrollTop !== null) {
     const expectedTop = expectedProgrammaticScrollTop
     expectedProgrammaticScrollTop = null
-    if (Math.abs(window.scrollY - expectedTop) <= 1) return
+    if (Math.abs(window.scrollY - expectedTop) <= 1) {
+      lastVerticalControlPosition = nativePosition
+      return
+    }
   }
-  const wasAtRest = Math.abs(targetPosition - displayPosition) < springRestDistance
-    && Math.abs(springVelocity) < springRestSpeed
-  const progress = (window.scrollY - trackTop) / trackSpan
-  targetPosition = Math.min(
-    Math.max(0, progress * Math.max(0, props.articles.length - 1)),
-    Math.max(0, props.articles.length - 1),
-  )
-  if (wasAtRest) lastFrameTime = 0
-  updateCommittedIndex(targetPosition)
-  hitVisible.value = false
+
+  if (!verticalScrolling.value) {
+    beginScrub()
+    verticalScrolling.value = true
+  }
+  const delta = nativePosition - lastVerticalControlPosition
+  lastVerticalControlPosition = nativePosition
+  setInteractivePosition(displayPosition + delta)
   window.clearTimeout(scrollTimer)
-  scrollTimer = window.setTimeout(settleScroll, wheelIdleMs)
-  requestDraw()
+  scrollTimer = window.setTimeout(
+    settleScroll,
+    supportsScrollEnd(window) ? scrollEndWatchdogMs : gestureIdleMs,
+  )
 }
 
 const animateSelection = (to: number, duration: number) => {
@@ -432,21 +532,25 @@ const setHovered = (value: boolean) => {
   requestDraw()
 }
 
-const pixelsPerArticle = () =>
-  Math.min(280, Math.max(140, (stage.value?.clientWidth || window.innerWidth) * 0.3))
-
 const setInteractivePosition = (position: number) => {
   const nextPosition = clampPosition(position)
   targetPosition = nextPosition
   displayPosition = nextPosition
   springVelocity = 0
-  updateCommittedIndex(nextPosition)
   selectionProgress = 0
   hovered = false
   hitVisible.value = false
   window.clearTimeout(scrollTimer)
   requestDraw()
 }
+
+const pointInsideActiveCase = (clientX: number, clientY: number) => Boolean(
+  activeHitRect
+  && clientX >= activeHitRect.left
+  && clientX <= activeHitRect.right
+  && clientY >= activeHitRect.top
+  && clientY <= activeHitRect.bottom,
+)
 
 const onPointerDown = (event: PointerEvent) => {
   if (!ready.value || opening.value || !event.isPrimary) return
@@ -475,7 +579,12 @@ const onPointerDown = (event: PointerEvent) => {
 
 const onPointerMove = (event: PointerEvent) => {
   const gesture = dragGesture
-  if (!gesture || gesture.pointerId !== event.pointerId) return
+  if (!gesture || gesture.pointerId !== event.pointerId) {
+    if (event.pointerType === 'mouse') {
+      setHovered(pointInsideActiveCase(event.clientX, event.clientY))
+    }
+    return
+  }
 
   const deltaX = event.clientX - gesture.startX
   const deltaY = event.clientY - gesture.startY
@@ -488,20 +597,16 @@ const onPointerMove = (event: PointerEvent) => {
     }
 
     gesture.axis = 'horizontal'
-    if (horizontalScrolling.value) {
-      window.clearTimeout(horizontalScrollTimer)
-      horizontalScrolling.value = false
-      wheelSession = null
-      wheelPixelsPerArticle = 0
+    if (horizontalScrolling.value || verticalScrolling.value) {
+      settleToCommitted()
     }
     // Catch a running spring from its current visual position. The full pointer
     // travel since press still contributes, so the detent distance stays exact.
     gesture.startPosition = displayPosition
-    targetPosition = displayPosition
-    springVelocity = 0
+    beginScrub()
     dragging.value = true
-    hovered = false
     window.clearTimeout(scrollTimer)
+    window.clearTimeout(horizontalScrollTimer)
     stage.value?.setPointerCapture(event.pointerId)
     if (gesture.pointerType === 'mouse') {
       stage.value?.focus({ preventScroll: true })
@@ -530,90 +635,61 @@ const onPointerEnd = (event: PointerEvent) => {
   settleToCommitted()
 }
 
-const normalizeWheelDeltas = (event: WheelEvent) => {
-  const multiplier = event.deltaMode === WheelEvent.DOM_DELTA_LINE
-    ? 16
-    : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-      ? stage.value?.clientWidth || window.innerWidth
-      : 1
-  return {
-    x: event.deltaX * multiplier,
-    y: event.deltaY * multiplier,
-  }
+const settleHorizontalScroll = () => {
+  if (
+    !ready.value
+    || opening.value
+    || dragging.value
+    || verticalScrolling.value
+    || !horizontalScrolling.value
+  ) return
+  settleToCommitted()
 }
 
-const onWheel = (event: WheelEvent) => {
-  if (!ready.value || opening.value || dragging.value || event.ctrlKey) return
-
-  const deltas = normalizeWheelDeltas(event)
-  const horizontalDelta = event.shiftKey && Math.abs(deltas.x) < 1
-    ? deltas.y
-    : deltas.x
-  const now = event.timeStamp
-  if (!wheelSession || now - wheelSession.lastTime > wheelIdleMs) {
-    if (horizontalScrolling.value) settleToCommitted()
-    wheelSession = {
-      axis: 'pending',
-      lastTime: now,
-      accumulatedX: 0,
-      accumulatedY: 0,
-    }
-  } else {
-    wheelSession.lastTime = now
-  }
-
-  wheelSession.accumulatedX += horizontalDelta
-  wheelSession.accumulatedY += deltas.y
-  let horizontalInput = horizontalDelta
-
-  if (wheelSession.axis === 'pending') {
-    const accumulatedX = Math.abs(wheelSession.accumulatedX)
-    const accumulatedY = event.shiftKey ? 0 : Math.abs(wheelSession.accumulatedY)
-    const horizontalIntent = event.shiftKey
-      ? accumulatedX >= 0.25
-      : accumulatedX >= 0.5
-        && accumulatedX > accumulatedY * wheelAxisDominance
-    const verticalIntent = !event.shiftKey
-      && accumulatedY >= 0.5
-      && accumulatedY > accumulatedX * wheelAxisDominance
-
-    if (horizontalIntent) {
-      wheelSession.axis = 'horizontal'
-      wheelPixelsPerArticle = pixelsPerArticle()
-      horizontalScrolling.value = true
-      targetPosition = displayPosition
-      springVelocity = 0
-      horizontalInput = wheelSession.accumulatedX
-    } else if (verticalIntent) {
-      wheelSession.axis = 'vertical'
-    } else if (Math.max(accumulatedX, accumulatedY) >= 1) {
-      // Resolve diagonal high-resolution packets by their cumulative direction.
-      wheelSession.axis = accumulatedX > accumulatedY ? 'horizontal' : 'vertical'
-      if (wheelSession.axis === 'horizontal') {
-        wheelPixelsPerArticle = pixelsPerArticle()
-        horizontalScrolling.value = true
-        targetPosition = displayPosition
-        springVelocity = 0
-        horizontalInput = wheelSession.accumulatedX
-      }
+const onHorizontalRailScroll = () => {
+  const rail = horizontalRail.value
+  if (!rail || !ready.value || opening.value || dragging.value || verticalScrolling.value) return
+  const nativePosition = clampPosition(rail.scrollLeft / Math.max(1, horizontalPitch))
+  if (expectedHorizontalScrollLeft !== null) {
+    const expectedLeft = expectedHorizontalScrollLeft
+    expectedHorizontalScrollLeft = null
+    if (Math.abs(rail.scrollLeft - expectedLeft) <= 1) {
+      lastHorizontalControlPosition = nativePosition
+      return
     }
   }
 
+  if (!horizontalScrolling.value) {
+    beginScrub()
+    horizontalScrolling.value = true
+  }
+  const delta = nativePosition - lastHorizontalControlPosition
+  lastHorizontalControlPosition = nativePosition
+  setInteractivePosition(displayPosition + delta)
   window.clearTimeout(horizontalScrollTimer)
-  horizontalScrollTimer = window.setTimeout(() => {
-    const shouldSettle = wheelSession?.axis === 'horizontal'
-    wheelSession = null
-    if (shouldSettle) settleToCommitted()
-  }, wheelIdleMs)
-
-  if (wheelSession.axis !== 'horizontal') return
-
-  // Axis-lock the whole trackpad transaction. Later diagonal packets stay in
-  // the shelf instead of alternately driving native vertical/browser history.
-  if (event.cancelable) event.preventDefault()
-  setInteractivePosition(
-    displayPosition + horizontalInput / Math.max(1, wheelPixelsPerArticle),
+  horizontalScrollTimer = window.setTimeout(
+    settleHorizontalScroll,
+    supportsScrollEnd(rail) ? scrollEndWatchdogMs : gestureIdleMs,
   )
+}
+
+const onHorizontalRailScrollEnd = () => {
+  window.clearTimeout(horizontalScrollTimer)
+  settleHorizontalScroll()
+}
+
+const onTouchStart = (event: TouchEvent) => {
+  touchContactActive = event.touches.length > 0
+}
+
+const onTouchEnd = (event: TouchEvent) => {
+  touchContactActive = event.touches.length > 0
+  if (!touchContactActive && verticalSettlePending) settleScroll()
+}
+
+const activateFromSurface = (event: MouseEvent) => {
+  if (!pointInsideActiveCase(event.clientX, event.clientY)) return
+  activateCurrent(event)
 }
 
 const activateCurrent = (event?: MouseEvent) => {
@@ -658,14 +734,17 @@ const focusForOpen = async () => {
   opening.value = true
   window.clearTimeout(scrollTimer)
   window.clearTimeout(horizontalScrollTimer)
-  wheelSession = null
+  scrubAnchorIndex = null
+  verticalSettlePending = false
   dragging.value = false
   horizontalScrolling.value = false
+  verticalScrolling.value = false
   hovered = false
   displayPosition = currentIndex.value
   targetPosition = currentIndex.value
   springVelocity = 0
   syncWindowScroll(scrollTopForIndex(currentIndex.value))
+  syncHorizontalRail(currentIndex.value)
   draw()
   await animateSelection(1, 300)
   if (disposed || !engine) throw new Error('Archive scene was disposed during transition')
@@ -682,6 +761,7 @@ const finishReturnPose = async () => {
   displayPosition = currentIndex.value
   springVelocity = 0
   syncWindowScroll(scrollTopForIndex(currentIndex.value))
+  syncHorizontalRail(currentIndex.value)
   draw()
   updateHitTarget()
   announcedIndex.value = currentIndex.value
@@ -713,14 +793,21 @@ const teardownScene = () => {
   window.cancelAnimationFrame(animationFrame)
   animationFrame = 0
   window.removeEventListener('scroll', onScroll)
+  window.removeEventListener('scrollend', settleScroll)
   window.removeEventListener('resize', measureTrack)
-  window.removeEventListener('wheel', onWheel, true)
   document.removeEventListener('visibilitychange', requestDraw)
   dragGesture = null
-  wheelSession = null
+  scrubAnchorIndex = null
+  touchContactActive = false
+  verticalSettlePending = false
   expectedProgrammaticScrollTop = null
+  expectedHorizontalScrollLeft = null
+  lastHorizontalControlPosition = 0
+  lastVerticalControlPosition = 0
+  activeHitRect = null
   dragging.value = false
   horizontalScrolling.value = false
+  verticalScrolling.value = false
   document.documentElement.classList.remove('archive-scene-active')
   resizeObserver?.disconnect()
   resizeObserver = null
@@ -737,7 +824,12 @@ const teardownScene = () => {
 
 onMounted(async () => {
   await nextTick()
-  if (!stage.value || !canvas.value) {
+  if (
+    !stage.value
+    || !canvas.value
+    || !horizontalRail.value
+    || !horizontalRailContent.value
+  ) {
     useFallback('missing-stage')
     return
   }
@@ -849,8 +941,8 @@ onMounted(async () => {
   resizeObserver.observe(stage.value)
 
   window.addEventListener('scroll', onScroll, { passive: true })
+  window.addEventListener('scrollend', settleScroll, { passive: true })
   window.addEventListener('resize', measureTrack, { passive: true })
-  window.addEventListener('wheel', onWheel, { passive: false, capture: true })
   document.addEventListener('visibilitychange', requestDraw)
   document.documentElement.classList.add('archive-scene-active')
 
@@ -902,6 +994,7 @@ onBeforeUnmount(() => {
 
 .archive-scene--dragging,
 .archive-scene--dragging .archive-scene__canvas,
+.archive-scene--dragging .archive-scene__horizontal-rail,
 .archive-scene--dragging .archive-scene__hit {
   cursor: grabbing;
 }
@@ -917,12 +1010,33 @@ onBeforeUnmount(() => {
   height: 100%;
 }
 
+.archive-scene__horizontal-rail {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: none;
+  scrollbar-width: none;
+  touch-action: pan-y pinch-zoom;
+  cursor: inherit;
+}
+
+.archive-scene__horizontal-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.archive-scene__horizontal-rail-content {
+  min-width: 100%;
+  height: 1px;
+}
+
 .archive-scene__topline,
 .archive-scene__footer,
 .archive-scene__arrow,
 .archive-scene__hit {
   position: absolute;
-  z-index: 2;
+  z-index: 3;
 }
 
 .archive-scene__topline {
@@ -954,7 +1068,7 @@ onBeforeUnmount(() => {
 
 .archive-scene__hit--visible {
   opacity: 1;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .archive-scene__hit:focus-visible {

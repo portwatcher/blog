@@ -88,7 +88,7 @@ const initialIndex = computed(() => {
   )
 })
 const trackStyle = computed(() => ({
-  '--archive-scroll-span': `${Math.max(0, articles.value.length - 1) * 144}px`,
+  '--archive-scroll-span': `${Math.max(0, articles.value.length - 1) * 220}px`,
 }))
 
 const articleLocation = (article: Article) => ({
