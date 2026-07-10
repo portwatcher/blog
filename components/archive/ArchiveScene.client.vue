@@ -490,10 +490,11 @@ const settleToCommitted = () => {
   currentIndex.value = nextIndex
   presentationIndex = nextIndex
   targetPosition = nextIndex
+  displayPosition = nextIndex
   springVelocity = 0
   lastFrameTime = 0
-  // Scrolling is over: start the one full extraction now instead of waiting
-  // for the spring's imperceptible tail. Both finish visually within 300ms.
+  // Native scrolling is over. Align once with no synthetic velocity tail,
+  // then let the physical extraction be the only remaining movement.
   void animatePresentation(1, presentationDuration)
   syncWindowScroll(scrollTopForIndex(nextIndex))
   syncHorizontalRail(nextIndex)
