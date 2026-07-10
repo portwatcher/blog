@@ -243,16 +243,13 @@ const clampPosition = (value: number) =>
   Math.min(Math.max(0, value), Math.max(0, props.articles.length - 1))
 
 const switchThreshold = 0.82
-const gestureIdleMs = 420
-const scrollEndWatchdogMs = 1800
+const scrollIdleSettleMs = 80
 const axisDominance = 1.25
 const springStiffness = 190
 const springDamping = 20
 const springRestDistance = 0.0006
 const springRestSpeed = 0.006
-const presentationDuration = 300
-const supportsScrollEnd = (target: EventTarget) =>
-  'onscrollend' in (target as EventTarget & { onscrollend?: unknown })
+const presentationDuration = 220
 const sceneFrame: ArchiveSceneFrame = {
   position: 0,
   selectedIndex: 0,
@@ -554,7 +551,7 @@ const onScroll = () => {
   window.clearTimeout(scrollTimer)
   scrollTimer = window.setTimeout(
     settleScroll,
-    supportsScrollEnd(window) ? scrollEndWatchdogMs : gestureIdleMs,
+    scrollIdleSettleMs,
   )
 }
 
@@ -742,7 +739,7 @@ const onHorizontalRailScroll = () => {
   window.clearTimeout(horizontalScrollTimer)
   horizontalScrollTimer = window.setTimeout(
     settleHorizontalScroll,
-    supportsScrollEnd(rail) ? scrollEndWatchdogMs : gestureIdleMs,
+    scrollIdleSettleMs,
   )
 }
 

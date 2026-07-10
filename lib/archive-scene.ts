@@ -84,6 +84,8 @@ const alignedCameraOffset = pullDistance - cameraDepthOffset
 const cameraY = 0.72
 const labelWidth = caseWidth * 0.94
 const labelHeight = caseHeight * 0.955
+const spineLabelWidth = caseDepth * 0.86
+const spineLabelHeight = caseHeight * 0.9
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
@@ -182,6 +184,102 @@ const createLabel = () => {
       height: 120,
     } satisfies TitleBounds,
   }
+}
+
+const wrapSpineTitle = (
+  context: CanvasRenderingContext2D,
+  title: string,
+  maxWidth: number,
+  maxLines: number,
+) => {
+  const characters = Array.from(title.trim().replace(/\s+/g, ' '))
+  const lines: string[] = []
+  let line = ''
+  let consumed = 0
+
+  for (const character of characters) {
+    const candidate = `${line}${character}`
+    if (line && context.measureText(candidate).width > maxWidth) {
+      lines.push(line.trim())
+      if (lines.length === maxLines) break
+      line = character === ' ' ? '' : character
+    } else {
+      line = candidate
+    }
+    consumed += 1
+  }
+
+  if (line && lines.length < maxLines) lines.push(line.trim())
+  const truncated = consumed < characters.length
+  if (truncated && lines.length) {
+    let last = lines[lines.length - 1]
+    while (last.length > 1 && context.measureText(`${last}…`).width > maxWidth) {
+      last = last.slice(0, -1)
+    }
+    lines[lines.length - 1] = `${last}…`
+  }
+
+  return { lines, truncated }
+}
+
+const createSpineLabel = () => {
+  const canvas = document.createElement('canvas')
+  canvas.width = 160
+  canvas.height = 1200
+  const context = canvas.getContext('2d', { alpha: false })
+  if (!context) throw new Error('Canvas 2D is unavailable')
+
+  const texture = new CanvasTexture(canvas)
+  texture.colorSpace = SRGBColorSpace
+  texture.generateMipmaps = false
+  texture.minFilter = LinearFilter
+  texture.magFilter = LinearFilter
+
+  return {
+    canvas,
+    context,
+    texture,
+    articleIndex: -1,
+    paintKey: '',
+  }
+}
+
+const paintSpineLabel = (
+  label: ReturnType<typeof createSpineLabel>,
+  article: ArchiveSceneArticle,
+  index: number,
+  titleFontFamily: string,
+) => {
+  const paintKey = `${index}:${titleFontFamily}`
+  if (label.paintKey === paintKey) return
+  label.paintKey = paintKey
+  label.articleIndex = index
+
+  const { canvas, context } = label
+  context.fillStyle = '#ffffff'
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.fillStyle = '#20252a'
+  context.textAlign = 'center'
+  context.textBaseline = 'middle'
+  context.letterSpacing = '0px'
+
+  let fontSize = 36
+  let wrapped = { lines: [] as string[], truncated: true }
+  while (fontSize >= 20) {
+    context.font = `700 ${fontSize}px ${titleFontFamily}`
+    wrapped = wrapSpineTitle(context, article.title, 128, 15)
+    if (!wrapped.truncated || fontSize === 20) break
+    fontSize -= 2
+  }
+
+  const lineHeight = fontSize * 1.22
+  const blockHeight = wrapped.lines.length * lineHeight
+  let y = (canvas.height - blockHeight + lineHeight) / 2
+  for (const line of wrapped.lines) {
+    context.fillText(line, canvas.width / 2, y)
+    y += lineHeight
+  }
+  label.texture.needsUpdate = true
 }
 
 const paintLabel = (
@@ -351,12 +449,37 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     return mesh
   })
 
+  // Only the one or two cases participating in the current browse handoff get
+  // spine textures. This keeps title feedback immediate without allocating a
+  // texture and draw call for every article on low-end devices.
+  const spineLabelGeometry = new PlaneGeometry(spineLabelWidth, spineLabelHeight)
+  const spineLabels = [createSpineLabel(), createSpineLabel()]
+  const spineLabelMeshes = spineLabels.map((label) => {
+    const spineLabelMaterial = new MeshStandardMaterial({
+      map: label.texture,
+      color: 0xffffff,
+      roughness: 0.84,
+      metalness: 0,
+    })
+    const mesh = new Mesh(spineLabelGeometry, spineLabelMaterial)
+    mesh.matrixAutoUpdate = false
+    mesh.visible = false
+    mesh.frustumCulled = false
+    scene.add(mesh)
+    return mesh
+  })
+
   const poseObject = new Object3D()
   const shelfRotationObject = new Object3D()
   const displayRotationObject = new Object3D()
   const facingObject = new Object3D()
   displayRotationObject.rotation.set(-0.16, 0.4, -0.1, 'XYZ')
   const labelOffset = new Matrix4().makeTranslation(0, 0, caseDepth / 2 + 0.008)
+  const spineLabelOffsetObject = new Object3D()
+  spineLabelOffsetObject.position.set(-caseWidth / 2 - 0.009, 0, 0)
+  spineLabelOffsetObject.rotation.y = -Math.PI / 2
+  spineLabelOffsetObject.updateMatrix()
+  const spineLabelOffset = spineLabelOffsetObject.matrix.clone()
   const hiddenMatrix = new Matrix4().makeScale(0, 0, 0)
   const projectedPoint = new Vector3()
   const cameraTarget = new Vector3()
@@ -559,6 +682,32 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     mesh.visible = true
   }
 
+  const setSpineLabelMatrix = (
+    mesh: Mesh,
+    label: ReturnType<typeof createSpineLabel>,
+    articleIndex: number,
+    frame: ArchiveSceneFrame,
+  ) => {
+    const article = articles[articleIndex]
+    if (!article) {
+      mesh.visible = false
+      return
+    }
+
+    // The spine title is for browsing. As soon as the case begins turning,
+    // hand legibility over to the full front label instead of compressing the
+    // spine text into an unreadable edge-on sliver.
+    if (presentationForIndex(articleIndex, frame) >= turnStart) {
+      mesh.visible = false
+      return
+    }
+
+    paintSpineLabel(label, article, articleIndex, titleFontFamily)
+    const pose = getPose(articleIndex, frame)
+    mesh.matrix.copy(pose.matrix).multiply(spineLabelOffset)
+    mesh.visible = true
+  }
+
   const syncActiveShelfCases = (indexA: number, indexB: number) => {
     let changed = false
     const hiddenAIsActive = hiddenIndexA >= 0
@@ -639,6 +788,50 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     setLabelMatrix(labelMeshes[upperSlot], labels[upperSlot], upper, frame)
   }
 
+  const setActiveSpineLabels = (
+    lower: number,
+    upper: number,
+    frame: ArchiveSceneFrame,
+  ) => {
+    const lowerSlot = spineLabels[0].articleIndex === lower
+      ? 0
+      : spineLabels[1].articleIndex === lower
+        ? 1
+        : 0
+
+    if (upper === lower) {
+      const hiddenSlot = lowerSlot === 0 ? 1 : 0
+      setSpineLabelMatrix(
+        spineLabelMeshes[lowerSlot],
+        spineLabels[lowerSlot],
+        lower,
+        frame,
+      )
+      spineLabelMeshes[hiddenSlot].visible = false
+      return
+    }
+
+    let upperSlot = spineLabels[0].articleIndex === upper
+      ? 0
+      : spineLabels[1].articleIndex === upper
+        ? 1
+        : lowerSlot === 0 ? 1 : 0
+    if (upperSlot === lowerSlot) upperSlot = lowerSlot === 0 ? 1 : 0
+
+    setSpineLabelMatrix(
+      spineLabelMeshes[lowerSlot],
+      spineLabels[lowerSlot],
+      lower,
+      frame,
+    )
+    setSpineLabelMatrix(
+      spineLabelMeshes[upperSlot],
+      spineLabels[upperSlot],
+      upper,
+      frame,
+    )
+  }
+
   const resize = () => {
     const nextWidth = Math.max(1, Math.round(host.clientWidth))
     const nextHeight = Math.max(1, Math.round(host.clientHeight))
@@ -703,6 +896,7 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     setActiveCase(activeCases[0], lower, frame)
     setActiveCase(activeCases[1], secondIndex, frame)
 
+    setActiveSpineLabels(lower, upper, frame)
     setActiveLabels(lower, upper, frame)
 
     renderer.render(scene, camera)
@@ -798,6 +992,9 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
       labels.forEach((label) => {
         label.paintKey = ''
       })
+      spineLabels.forEach((label) => {
+        label.paintKey = ''
+      })
     },
     resize() {
       width = 0
@@ -808,8 +1005,18 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
       geometry.dispose()
       material.dispose()
       labelGeometry.dispose()
+      spineLabelGeometry.dispose()
       labels.forEach((label) => label.texture.dispose())
+      spineLabels.forEach((label) => label.texture.dispose())
       labelMeshes.forEach((mesh) => {
+        const meshMaterial = mesh.material
+        if (Array.isArray(meshMaterial)) {
+          meshMaterial.forEach((item) => item.dispose())
+        } else {
+          meshMaterial.dispose()
+        }
+      })
+      spineLabelMeshes.forEach((mesh) => {
         const meshMaterial = mesh.material
         if (Array.isArray(meshMaterial)) {
           meshMaterial.forEach((item) => item.dispose())
