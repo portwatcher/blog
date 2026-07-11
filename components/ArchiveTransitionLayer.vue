@@ -83,15 +83,30 @@ const animateElement = async (
 ) => {
   if (!element) return false
 
+  const effectiveDuration = reducedMotion() ? 1 : duration
   const animation = element.animate(keyframes, {
-    duration: reducedMotion() ? 1 : duration,
+    duration: effectiveDuration,
     easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
     fill: 'both',
   })
   activeAnimations.push(animation)
+  let timeout = 0
 
   try {
-    await animation.finished
+    const outcome = await Promise.race<'finished' | 'cancelled' | 'timeout'>([
+      animation.finished.then(
+        () => 'finished' as const,
+        () => 'cancelled' as const,
+      ),
+      new Promise<'timeout'>((resolve) => {
+        timeout = window.setTimeout(
+          () => resolve('timeout'),
+          effectiveDuration + 200,
+        )
+      }),
+    ])
+    if (outcome === 'cancelled') return false
+
     const finalFrame = keyframes[keyframes.length - 1]
     if (typeof finalFrame?.transform === 'string') {
       element.style.transform = finalFrame.transform
@@ -104,6 +119,7 @@ const animateElement = async (
   } catch {
     return false
   } finally {
+    window.clearTimeout(timeout)
     activeAnimations = activeAnimations.filter((item) => item !== animation)
   }
 }

@@ -92,9 +92,53 @@ const languageLabels: Record<string, string> = {
 
 const getRouteTitle = (value: unknown) =>
   String(Array.isArray(value) ? value[0] || '' : value || '')
+const archivePath = '/archive'
+const isArchiveHistoryPath = (value: unknown) => {
+  if (!value || !import.meta.client) return false
+
+  try {
+    return new URL(String(value), window.location.origin).pathname === archivePath
+  } catch {
+    return false
+  }
+}
 let openedFromArchive = Boolean(
   archiveTransition.state.value.record?.routeTitle === getRouteTitle(route.params.title),
 )
+
+const ensureArchiveReturnEntry = () => {
+  if (!import.meta.client || !openedFromArchive) return
+
+  const currentState = window.history.state || {}
+  if (isArchiveHistoryPath(currentState.back)) return
+
+  const currentPath = route.fullPath
+  const currentPosition = Number.isFinite(Number(currentState.position))
+    ? Number(currentState.position)
+    : Math.max(0, window.history.length - 1)
+  const archiveState: Record<string, unknown> = {
+    ...currentState,
+    back: currentState.back ?? null,
+    current: archivePath,
+    forward: currentPath,
+    replaced: true,
+    position: currentPosition,
+    scroll: currentState.scroll ?? null,
+  }
+  delete archiveState.archiveOrigin
+
+  window.history.replaceState(archiveState, '', archivePath)
+  window.history.pushState({
+    ...currentState,
+    back: archivePath,
+    current: currentPath,
+    forward: null,
+    replaced: false,
+    position: currentPosition + 1,
+    scroll: null,
+    archiveOrigin: archivePath,
+  }, '', currentPath)
+}
 
 titleOwnedByTransition.value = Boolean(
   archiveTransition.state.value.record?.routeTitle === getRouteTitle(route.params.title)
@@ -217,7 +261,7 @@ const loadArticle = async () => {
 }
 
 const articleRequestKey = `article:${String(route.params.title)}:${currentLang.value || 'original'}`
-const { data:initialArticle } = await useAsyncData<Article | null>(articleRequestKey, async () => {
+const { data: initialArticle } = await useAsyncData<Article | null>(articleRequestKey, async () => {
   if (import.meta.client) {
     const primed = await takePrimedArchiveArticle(
       String(route.params.title),
@@ -232,7 +276,9 @@ const { data:initialArticle } = await useAsyncData<Article | null>(articleReques
   })
   return articles[0] || null
 })
-article.value = initialArticle.value
+watch(initialArticle, (value) => {
+  article.value = value ?? null
+}, { immediate: true })
 
 const languageTabs = computed(() =>
   availableLanguageCodes.value.map((lang) => ({
@@ -244,9 +290,12 @@ const languageTabs = computed(() =>
 )
 
 onMounted(async () => {
+  const historyState = window.history.state || {}
   openedFromArchive = openedFromArchive || Boolean(
-    window.history.state?.archiveOrigin === '/archive',
+    historyState.archiveOrigin === archivePath
+    || isArchiveHistoryPath(historyState.back),
   )
+  ensureArchiveReturnEntry()
   void applyMarkdownImageLayout()
   await nextTick()
   const routeTitle = getRouteTitle(route.params.title)
@@ -279,16 +328,7 @@ onMounted(async () => {
 
 onBeforeRouteLeave((to) => {
   const routeTitle = getRouteTitle(route.params.title)
-  // On a native history traversal the browser URL/state moves before Vue
-  // Router runs leave guards. Programmatic header links still point at the
-  // current article here, so they must remain untouched.
-  const browserIsAtTarget = import.meta.client
-    && window.history.state?.current === to.fullPath
-  const recoverSkippedArchive = openedFromArchive
-    && browserIsAtTarget
-    && to.path !== '/archive'
-
-  if (to.path === '/archive' || recoverSkippedArchive) {
+  if (to.path === archivePath) {
     const titleRect = articleTitleText.value?.getBoundingClientRect()
       || articleTitle.value?.getBoundingClientRect()
       || new DOMRect()
@@ -304,8 +344,6 @@ onBeforeRouteLeave((to) => {
       titleOwnedByTransition.value = false
       await archiveTransition.cancel()
     })
-
-    if (recoverSkippedArchive) return { path: '/archive' }
     return
   }
 
