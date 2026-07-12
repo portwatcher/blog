@@ -55,6 +55,11 @@ export default defineI18nConfig(() => ({
       movie: 'Movies',
       loadMore: 'Load More',
       skipToContent: 'Skip to content',
+      archiveView: {
+        label: 'Archive view',
+        list: 'List view',
+        threeD: '3D view',
+      },
       archiveScene: {
         roleDescription: 'article shelf',
         region: 'Archive, {count} posts',
@@ -84,6 +89,11 @@ export default defineI18nConfig(() => ({
       movie: '影',
       loadMore: '更多',
       skipToContent: '跳到正文',
+      archiveView: {
+        label: '归档视图',
+        list: '列表视图',
+        threeD: '3D 视图',
+      },
       archiveScene: {
         roleDescription: '文章档案架',
         region: '归档，共 {count} 篇文章',
@@ -113,6 +123,11 @@ export default defineI18nConfig(() => ({
       movie: '映画',
       loadMore: 'さらに',
       skipToContent: '本文へ移動',
+      archiveView: {
+        label: 'アーカイブ表示',
+        list: 'リスト表示',
+        threeD: '3D 表示',
+      },
       archiveScene: {
         roleDescription: '記事アーカイブ棚',
         region: 'アーカイブ、全{count}件',

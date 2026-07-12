@@ -1,13 +1,42 @@
 <template>
   <section
     class="archive"
-    :class="`archive--${sceneMode}`"
+    :class="{
+      'archive--3d': archiveView === '3d',
+      'archive--webgl': sceneActive,
+    }"
     aria-labelledby="archive-title"
   >
     <h1 id="archive-title" class="archive__title">{{ t('archive') }}</h1>
 
+    <div
+      class="archive__view-switch"
+      role="group"
+      :aria-label="t('archiveView.label')"
+    >
+      <button
+        type="button"
+        :aria-label="t('archiveView.list')"
+        :title="t('archiveView.list')"
+        :aria-pressed="archiveView === 'list'"
+        @click="archiveView = 'list'"
+      >
+        <ListIcon aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        :aria-label="t('archiveView.threeD')"
+        :title="t('archiveView.threeD')"
+        :aria-pressed="archiveView === '3d'"
+        @click="archiveView = '3d'"
+      >
+        <ListIcon class="archive__view-icon--3d" aria-hidden="true" />
+      </button>
+    </div>
+
     <div v-if="articles.length" class="archive__track" :style="trackStyle">
       <ArchiveScene
+        v-if="archiveView === '3d'"
         :articles="articles"
         :initial-index="initialIndex"
         :returning="returning"
@@ -16,29 +45,21 @@
         @ready="onSceneReady"
       />
 
-      <ol
-        class="archive__fallback"
+      <div
+        class="archive__list"
         :aria-label="t('archiveScene.articleList')"
-        :aria-hidden="sceneMode === 'webgl' ? 'true' : undefined"
-        :inert="sceneMode === 'webgl'"
+        :aria-hidden="sceneActive ? 'true' : undefined"
+        :inert="sceneActive"
       >
-        <li
-          v-for="(article, index) in articles"
-          :key="`${getArticleRouteTitle(article)}-${article.date}`"
-          class="archive__fallback-item"
+        <section
+          v-for="[year, yearArticles] in yearGroups"
+          :key="year"
+          class="archive__year"
         >
-          <NuxtLink
-            class="archive__fallback-link"
-            :to="articleLocation(article)"
-          >
-            <span class="archive__fallback-index">
-              {{ String(index + 1).padStart(2, '0') }} / {{ String(articles.length).padStart(2, '0') }}
-            </span>
-            <strong>{{ article.title }}</strong>
-            <time :datetime="article.date">{{ formatDate(article.date) }}</time>
-          </NuxtLink>
-        </li>
-      </ol>
+          <h2>{{ year }}</h2>
+          <SummaryTitleList :articles="yearArticles" />
+        </section>
+      </div>
     </div>
 
     <p v-else class="archive__empty">{{ t('archiveScene.empty') }}</p>
@@ -46,7 +67,10 @@
 </template>
 
 <script setup lang="ts">
+import { List as ListIcon } from 'lucide-vue-next'
 import type { ArchiveSceneRects } from '~/lib/archive-scene'
+
+type ArchiveView = 'list' | '3d'
 
 const config = useRuntimeConfig()
 const { locale, t } = useI18n()
@@ -80,9 +104,40 @@ const { data } = await useFetch<Article[]>('/api/articles', {
 
 const articles = computed(() => data.value || [])
 const sceneMode = ref<'pending' | 'webgl' | 'fallback'>('pending')
+const archiveView = useRouteQueryState<ArchiveView>({
+  key: 'view',
+  defaultValue: 'list',
+  parse(value, defaultValue) {
+    return value === 'list' || value === '3d' ? value : defaultValue
+  },
+  serialize(value) {
+    return value
+  },
+})
+const sceneActive = computed(() =>
+  archiveView.value === '3d' && sceneMode.value === 'webgl',
+)
+const yearGroups = computed(() => {
+  const groups: YearGroupMap = new Map()
+
+  articles.value.forEach((article) => {
+    const year = new Date(article.date).getFullYear()
+    if (Number.isNaN(year)) return
+
+    const group = groups.get(year)
+    if (group) {
+      group.push(article)
+    } else {
+      groups.set(year, [article])
+    }
+  })
+
+  return Array.from(groups.entries())
+})
 
 const returning = computed(() =>
-  ['return-covering', 'returning'].includes(archiveTransition.state.value.phase)
+  archiveView.value === '3d'
+  && ['return-covering', 'returning'].includes(archiveTransition.state.value.phase)
   && Boolean(archiveTransition.state.value.record),
 )
 const initialIndex = computed(() => {
@@ -103,17 +158,6 @@ const articleLocation = (article: Article) => ({
   params: { title: getArticleRouteTitle(article) },
   state: { archiveOrigin: '/archive' },
 })
-
-const formatDate = (value: string) => {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-
-  return new Intl.DateTimeFormat(locale.value, {
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-  }).format(date)
-}
 
 const setSceneMode = async (mode: 'webgl' | 'fallback') => {
   sceneMode.value = mode
@@ -155,6 +199,36 @@ watch(
     if (phase === 'returning') void finishReturn()
   },
 )
+
+watch(archiveView, async (view) => {
+  ++openOperation
+  ++returnOperation
+  activeOpenController = null
+  activeOpenGeometry = undefined
+  expectedDestination = null
+  returnController = null
+  sceneMode.value = 'pending'
+
+  if (import.meta.client) {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  }
+
+  if (
+    view === 'list'
+    && archiveTransition.state.value.phase !== 'idle'
+  ) {
+    await archiveTransition.cancel()
+  }
+})
+
+onMounted(() => {
+  if (
+    archiveView.value === 'list'
+    && archiveTransition.state.value.phase !== 'idle'
+  ) {
+    void archiveTransition.cancel()
+  }
+})
 
 const openArticle = async (
   article: Article,
@@ -263,6 +337,65 @@ useSeoMeta({
   white-space: nowrap;
 }
 
+.archive__view-switch {
+  position: fixed;
+  top: calc(var(--site-header-height, 47px) + env(safe-area-inset-top) + 0.75rem);
+  left: 50%;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: repeat(2, 2rem);
+  border: 1px solid var(--color-border);
+  border-radius: 0.3rem;
+  overflow: hidden;
+  background: var(--color-surface);
+  color: var(--color-muted);
+  transform: translateX(-50%);
+}
+
+.archive__view-switch button {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  padding: 0;
+  place-items: center;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.archive__view-switch button + button {
+  border-left: 1px solid var(--color-border);
+}
+
+.archive__view-switch button:hover:not([aria-pressed='true']) {
+  background: var(--color-subtle);
+  color: var(--color-heading);
+}
+
+.archive__view-switch button[aria-pressed='true'] {
+  background: var(--color-heading);
+  color: var(--color-surface);
+}
+
+.archive__view-switch button:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--color-heading);
+  outline-offset: -3px;
+}
+
+.archive__view-switch svg {
+  width: 1rem;
+  height: 1rem;
+  stroke-width: 1.75;
+}
+
+.archive__view-icon--3d {
+  transform: perspective(1.5rem) rotateX(58deg);
+  transform-origin: center;
+}
+
 .archive__track {
   position: relative;
   width: 100%;
@@ -273,7 +406,7 @@ useSeoMeta({
   min-height: calc(100svh + var(--archive-scroll-span, 0px));
 }
 
-.archive:not(.archive--webgl) :deep(.archive-scene) {
+.archive--3d:not(.archive--webgl) :deep(.archive-scene) {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -282,66 +415,22 @@ useSeoMeta({
   pointer-events: none;
 }
 
-.archive__fallback {
-  display: grid;
-  width: min(100%, 78rem);
+.archive__list {
+  width: 100%;
+  max-width: 64rem;
   margin: 0 auto;
-  padding: clamp(4rem, 10vw, 8rem) clamp(1rem, 4vw, 3rem);
+  padding: var(--site-header-height, 47px) 1rem 6rem;
   box-sizing: border-box;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
-  gap: clamp(1rem, 3vw, 2rem);
-  list-style: none;
 }
 
-.archive__fallback-item {
-  min-width: 0;
-  content-visibility: auto;
-  contain-intrinsic-size: 19rem 14rem;
+.archive__year h2 {
+  width: 100%;
+  margin: 4em 0;
+  font-size: 2em;
+  text-align: center;
 }
 
-.archive__fallback-link {
-  display: grid;
-  min-height: 17rem;
-  border: 1px solid var(--color-border);
-  padding: 1.25rem;
-  box-sizing: border-box;
-  background: var(--color-subtle);
-  color: var(--color-text);
-  grid-template-rows: auto 1fr auto;
-  gap: 1.5rem;
-  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
-    background-color 180ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.archive__fallback-link:hover {
-  background: var(--color-soft-border);
-  transform: translateY(-0.25rem);
-}
-
-.archive__fallback-link:focus-visible {
-  outline: 2px solid var(--color-heading);
-  outline-offset: 4px;
-}
-
-.archive__fallback-link strong {
-  align-self: center;
-  font-family: var(--font-sans);
-  font-size: clamp(1.25rem, 1rem + 1vw, 1.8rem);
-  font-weight: 650;
-  line-height: 1.22;
-  overflow-wrap: anywhere;
-  text-wrap: balance;
-}
-
-.archive__fallback-index,
-.archive__fallback-link time {
-  font-size: 0.6875rem;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-}
-
-.archive--webgl .archive__fallback {
+.archive--webgl .archive__list {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -364,24 +453,22 @@ useSeoMeta({
   color: var(--color-muted);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .archive__fallback-link {
-    transition: none;
-  }
-
-  .archive__fallback-link:hover {
-    transform: none;
-  }
-}
-
 @media print {
-  .archive__fallback {
-    grid-template-columns: repeat(2, 1fr);
-    padding: 1rem 0;
+  .archive__view-switch,
+  :deep(.archive-scene) {
+    display: none;
   }
 
-  .archive__fallback-link {
-    min-height: 10rem;
+  .archive--webgl .archive__list {
+    position: static;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+    margin: 0 auto;
+    padding: 0;
+    clip: auto;
+    clip-path: none;
+    white-space: normal;
   }
 }
 </style>
