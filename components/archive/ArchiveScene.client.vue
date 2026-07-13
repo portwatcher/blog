@@ -148,6 +148,7 @@ const emit = defineEmits<{
     },
   ]
   mode: [mode: 'webgl' | 'fallback']
+  shelfChange: [articleCount: number]
   ready: [controller: {
     getActiveRects: () => ArchiveSceneRects
     finishReturnPose: () => Promise<void>
@@ -561,20 +562,29 @@ const measureTrack = () => {
 }
 
 const scrollTopForPosition = (position: number) => {
-  const denominator = Math.max(1, yearShelves.value.length - 1)
-  return trackTop + (clampShelfIndex(position) / denominator) * trackSpan
+  const shelfStart = currentShelfArticleIndices.value[0] || 0
+  const shelfSteps = Math.max(
+    0,
+    currentShelfArticleIndices.value.length - 1,
+  )
+  if (!shelfSteps) return trackTop
+
+  const localPosition = clampPosition(position) - shelfStart
+  return trackTop + (localPosition / shelfSteps) * trackSpan
 }
 
-const scrollTopForIndex = (index: number) => scrollTopForPosition(
-  shelfIndexForArticle(index),
-)
+const scrollTopForIndex = (index: number) => scrollTopForPosition(index)
 
 const positionForScrollTop = (top: number) => {
-  const progress = (top - trackTop) / trackSpan
-  return Math.min(
-    Math.max(0, progress * Math.max(0, yearShelves.value.length - 1)),
-    Math.max(0, yearShelves.value.length - 1),
+  const shelfStart = currentShelfArticleIndices.value[0] || 0
+  const shelfSteps = Math.max(
+    0,
+    currentShelfArticleIndices.value.length - 1,
   )
+  if (!shelfSteps) return shelfStart
+
+  const progress = Math.min(1, Math.max(0, (top - trackTop) / trackSpan))
+  return clampPosition(shelfStart + progress * shelfSteps)
 }
 
 const syncWindowScroll = (top: number) => {
@@ -720,7 +730,10 @@ const goToShelf = async (
   cameraToIndex = targetIndex
   shelfTransitionProgress = 0
   lastFrameTime = 0
-  updateHorizontalRailMetrics()
+  emit('shelfChange', currentShelfArticleIndices.value.length)
+  await nextTick()
+  if (disposed || !engine) return
+  measureTrack()
   syncWindowScroll(scrollTopForIndex(targetIndex))
   syncHorizontalRail(targetIndex)
 
@@ -749,9 +762,19 @@ const goToArticleIndex = (articleIndex: number) => {
 }
 
 const settleScroll = () => {
-  if (!verticalScrolling.value) return
-  verticalScrolling.value = false
-  gestureSettlePending = false
+  if (
+    opening.value
+    || !ready.value
+    || dragging.value
+    || horizontalScrolling.value
+    || shelfMoving.value
+    || !verticalScrolling.value
+  ) return
+  if (touchContactActive || wheelGestureActive) {
+    gestureSettlePending = true
+    return
+  }
+  settleToCommitted()
 }
 
 const onScroll = () => {
@@ -772,12 +795,13 @@ const onScroll = () => {
     }
   }
 
-  verticalScrolling.value = true
-  lastVerticalControlPosition = nativePosition
-  const nextShelfIndex = clampShelfIndex(nativePosition)
-  if (nextShelfIndex !== currentShelfIndex.value) {
-    void goToShelf(nextShelfIndex)
+  if (!verticalScrolling.value) {
+    beginScrub()
+    verticalScrolling.value = true
   }
+  const delta = nativePosition - lastVerticalControlPosition
+  lastVerticalControlPosition = nativePosition
+  setInteractivePosition(displayPosition + delta)
   window.clearTimeout(scrollTimer)
   scrollTimer = window.setTimeout(
     settleScroll,
@@ -1373,6 +1397,7 @@ onMounted(async () => {
 
   ready.value = true
   emit('mode', 'webgl')
+  emit('shelfChange', currentShelfArticleIndices.value.length)
   await nextTick()
   if (disposed || !engine || !stage.value) return
 

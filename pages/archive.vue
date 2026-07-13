@@ -42,6 +42,7 @@
         :returning="returning"
         @activate="openArticle"
         @mode="setSceneMode"
+        @shelf-change="setActiveShelfArticleCount"
         @ready="onSceneReady"
       />
 
@@ -104,6 +105,7 @@ const { data } = await useFetch<Article[]>('/api/articles', {
 
 const articles = computed(() => data.value || [])
 const sceneMode = ref<'pending' | 'webgl' | 'fallback'>('pending')
+const activeShelfArticleCount = ref(0)
 const archiveView = useRouteQueryState<ArchiveView>({
   key: 'view',
   defaultValue: 'list',
@@ -149,9 +151,16 @@ const initialIndex = computed(() => {
     Math.max(0, articles.value.length - 1),
   )
 })
-const trackStyle = computed(() => ({
-  '--archive-scroll-span': `${Math.max(0, yearGroups.value.length - 1) * 320}px`,
-}))
+const setActiveShelfArticleCount = (articleCount: number) => {
+  activeShelfArticleCount.value = Math.max(0, Math.floor(articleCount))
+}
+const trackStyle = computed(() => {
+  const firstShelfArticleCount = yearGroups.value[0]?.[1].length || 0
+  const articleCount = activeShelfArticleCount.value || firstShelfArticleCount
+  return {
+    '--archive-scroll-span': `${Math.max(0, articleCount - 1) * 220}px`,
+  }
+})
 
 const articleLocation = (article: Article) => ({
   name: 'articles-title',
