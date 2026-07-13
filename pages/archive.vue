@@ -392,7 +392,7 @@ useSeoMeta({
 }
 
 .archive__view-icon--3d {
-  transform: perspective(1.5rem) rotateX(58deg);
+  transform: rotate(90deg);
   transform-origin: center;
 }
 
