@@ -150,7 +150,7 @@ const initialIndex = computed(() => {
   )
 })
 const trackStyle = computed(() => ({
-  '--archive-scroll-span': `${Math.max(0, articles.value.length - 1) * 220}px`,
+  '--archive-scroll-span': `${Math.max(0, yearGroups.value.length - 1) * 320}px`,
 }))
 
 const articleLocation = (article: Article) => ({
@@ -340,7 +340,7 @@ useSeoMeta({
 .archive__view-switch {
   position: fixed;
   top: calc(var(--site-header-height, 47px) + env(safe-area-inset-top) + 0.75rem);
-  left: 50%;
+  left: max(1rem, env(safe-area-inset-left));
   z-index: 30;
   display: grid;
   grid-template-columns: repeat(2, 2rem);
@@ -349,7 +349,6 @@ useSeoMeta({
   overflow: hidden;
   background: var(--color-surface);
   color: var(--color-muted);
-  transform: translateX(-50%);
 }
 
 .archive__view-switch button {
@@ -374,7 +373,7 @@ useSeoMeta({
 }
 
 .archive__view-switch button[aria-pressed='true'] {
-  background: var(--color-heading);
+  background: var(--color-muted);
   color: var(--color-surface);
 }
 

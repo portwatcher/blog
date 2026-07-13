@@ -13,7 +13,6 @@
     :aria-hidden="ready ? undefined : 'true'"
     :inert="!ready"
     :tabindex="ready ? 0 : -1"
-    @keydown="onKeydown"
     @pointerdown="onPointerDown"
     @pointermove="onPointerMove"
     @pointerup="onPointerEnd"
@@ -46,7 +45,6 @@
     ></canvas>
 
     <div class="archive-scene__topline" aria-hidden="true">
-      <span>{{ t('archive') }}</span>
       <span>{{ t('archiveScene.posts', {
         count: String(articles.length).padStart(2, '0'),
       }) }}</span>
@@ -71,8 +69,8 @@
       class="archive-scene__arrow archive-scene__arrow--previous"
       type="button"
       :aria-label="t('archiveScene.previous')"
-      :disabled="!ready || currentIndex === 0 || opening || dragging || horizontalScrolling || verticalScrolling"
-      @click="goToIndex(currentIndex - 1)"
+      :disabled="!canGoPreviousArticle"
+      @click="goInShelf(-1)"
     >
       <span aria-hidden="true">←</span>
     </button>
@@ -81,16 +79,39 @@
       class="archive-scene__arrow archive-scene__arrow--next"
       type="button"
       :aria-label="t('archiveScene.next')"
-      :disabled="!ready || currentIndex === articles.length - 1 || opening || dragging || horizontalScrolling || verticalScrolling"
-      @click="goToIndex(currentIndex + 1)"
+      :disabled="!canGoNextArticle"
+      @click="goInShelf(1)"
     >
       <span aria-hidden="true">→</span>
     </button>
 
+    <button
+      v-if="hasPreviousShelf"
+      class="archive-scene__arrow archive-scene__arrow--shelf archive-scene__arrow--up"
+      type="button"
+      :aria-label="t('archiveScene.previousShelf')"
+      :disabled="!controlsAvailable"
+      @click="goToShelf(currentShelfIndex - 1)"
+    >
+      <span aria-hidden="true">↑</span>
+    </button>
+
+    <button
+      v-if="hasNextShelf"
+      class="archive-scene__arrow archive-scene__arrow--shelf archive-scene__arrow--down"
+      type="button"
+      :aria-label="t('archiveScene.nextShelf')"
+      :disabled="!controlsAvailable"
+      @click="goToShelf(currentShelfIndex + 1)"
+    >
+      <span aria-hidden="true">↓</span>
+    </button>
+
     <div class="archive-scene__footer">
       <div class="archive-scene__status" aria-hidden="true">
+        <span>{{ currentYear }}</span>
         <span>{{ formattedDate }}</span>
-        <span>{{ String(currentIndex + 1).padStart(2, '0') }} / {{ String(articles.length).padStart(2, '0') }}</span>
+        <span>{{ String(currentShelfArticlePosition + 1).padStart(2, '0') }} / {{ String(currentShelfArticleIndices.length).padStart(2, '0') }}</span>
       </div>
       <span class="archive-scene__hint" aria-hidden="true">{{ t('archiveScene.hint') }}</span>
     </div>
@@ -145,10 +166,55 @@ const opening = ref(false)
 const dragging = ref(false)
 const horizontalScrolling = ref(false)
 const verticalScrolling = ref(false)
+const shelfMoving = ref(false)
 const currentIndex = ref(0)
+const currentShelfIndex = ref(0)
 const hitVisible = ref(false)
 const hitStyle = ref<Record<string, string>>({})
 const currentArticle = computed(() => props.articles[currentIndex.value])
+const yearShelves = computed(() => {
+  const shelves: Array<{ year: string; articleIndices: number[] }> = []
+  const shelfByYear = new Map<string, number>()
+
+  props.articles.forEach((article, articleIndex) => {
+    const parsedYear = new Date(article.date).getFullYear()
+    const year = Number.isNaN(parsedYear) ? '—' : String(parsedYear)
+    let shelfIndex = shelfByYear.get(year)
+    if (shelfIndex === undefined) {
+      shelfIndex = shelves.length
+      shelfByYear.set(year, shelfIndex)
+      shelves.push({ year, articleIndices: [] })
+    }
+    shelves[shelfIndex].articleIndices.push(articleIndex)
+  })
+
+  return shelves
+})
+const currentShelf = computed(() => yearShelves.value[currentShelfIndex.value])
+const currentYear = computed(() => currentShelf.value?.year || '')
+const currentShelfArticleIndices = computed(
+  () => currentShelf.value?.articleIndices || [],
+)
+const lastVisitedArticleByShelf = new Map<number, number>()
+const currentShelfArticlePosition = computed(() => Math.max(
+  0,
+  currentShelfArticleIndices.value.indexOf(currentIndex.value),
+))
+const controlsAvailable = computed(() => ready.value
+  && !opening.value
+  && !dragging.value
+  && !horizontalScrolling.value
+  && !verticalScrolling.value
+  && !shelfMoving.value)
+const canGoPreviousArticle = computed(() => controlsAvailable.value
+  && currentShelfArticlePosition.value > 0)
+const canGoNextArticle = computed(() => controlsAvailable.value
+  && currentShelfArticlePosition.value
+    < currentShelfArticleIndices.value.length - 1)
+const hasPreviousShelf = computed(() => currentShelfIndex.value > 0)
+const hasNextShelf = computed(
+  () => currentShelfIndex.value < yearShelves.value.length - 1,
+)
 const announcedIndex = ref(0)
 const announcedArticle = computed(() => props.articles[announcedIndex.value])
 const formatDate = (value?: string) => {
@@ -200,6 +266,9 @@ let lastVerticalControlPosition = 0
 let targetPosition = 0
 let displayPosition = 0
 let springVelocity = 0
+let cameraFromIndex = 0
+let cameraToIndex = 0
+let shelfTransitionProgress = 1
 let presentationIndex = 0
 let presentationProgress = 1
 let selectionProgress = 0
@@ -238,12 +307,35 @@ let presentationTween: {
   duration: number
   resolve: () => void
 } | null = null
+let shelfTransitionTween: {
+  startedAt: number
+  duration: number
+  resolve: () => void
+} | null = null
 
 const clampIndex = (value: number) =>
   Math.min(Math.max(0, Math.round(value)), Math.max(0, props.articles.length - 1))
 
-const clampPosition = (value: number) =>
-  Math.min(Math.max(0, value), Math.max(0, props.articles.length - 1))
+const shelfIndexForArticle = (articleIndex: number) => {
+  const foundIndex = yearShelves.value.findIndex(
+    (shelf) => shelf.articleIndices.includes(clampIndex(articleIndex)),
+  )
+  return Math.max(0, foundIndex)
+}
+
+const clampShelfIndex = (value: number) => Math.min(
+  Math.max(0, Math.round(value)),
+  Math.max(0, yearShelves.value.length - 1),
+)
+
+const clampPosition = (value: number) => {
+  const indices = currentShelfArticleIndices.value
+  if (!indices.length) return clampIndex(value)
+  return Math.min(
+    Math.max(indices[0], value),
+    indices[indices.length - 1],
+  )
+}
 
 const switchThreshold = 0.82
 const scrollIdleFallbackMs = 260
@@ -254,9 +346,13 @@ const springDamping = 20
 const springRestDistance = 0.0006
 const springRestSpeed = 0.006
 const presentationDuration = 220
+const shelfTransitionDuration = 620
 const sceneFrame: ArchiveSceneFrame = {
   position: 0,
   selectedIndex: 0,
+  cameraFromIndex: 0,
+  cameraToIndex: 0,
+  shelfTransitionProgress: 1,
   presentationProgress: 1,
   selectionProgress: 0,
   hovered: false,
@@ -265,6 +361,9 @@ const sceneFrame: ArchiveSceneFrame = {
 const draw = () => {
   sceneFrame.position = displayPosition
   sceneFrame.selectedIndex = presentationIndex
+  sceneFrame.cameraFromIndex = cameraFromIndex
+  sceneFrame.cameraToIndex = cameraToIndex
+  sceneFrame.shelfTransitionProgress = shelfTransitionProgress
   sceneFrame.presentationProgress = presentationProgress
   sceneFrame.selectionProgress = selectionProgress
   sceneFrame.hovered = hovered
@@ -350,12 +449,29 @@ const frame = (now: number) => {
     }
   }
 
+  if (shelfTransitionTween) {
+    const elapsed = now - shelfTransitionTween.startedAt
+    const progress = Math.min(1, elapsed / shelfTransitionTween.duration)
+    shelfTransitionProgress = progress
+    if (progress === 1) {
+      shelfTransitionProgress = 1
+      const resolve = shelfTransitionTween.resolve
+      shelfTransitionTween = null
+      resolve()
+    }
+  }
+
   draw()
   const moving = Math.abs(targetPosition - displayPosition) >= springRestDistance
     || Math.abs(springVelocity) >= springRestSpeed
   if (directlyManipulated) {
     hitVisible.value = false
-    if (moving || selectionTween || presentationTween) requestDraw()
+    if (
+      moving
+      || selectionTween
+      || presentationTween
+      || shelfTransitionTween
+    ) requestDraw()
   } else if (moving) {
     // Presentation and the snap spring intentionally overlap. Once the card is
     // fully out and the remaining spring tail is visually negligible, it is
@@ -373,6 +489,9 @@ const frame = (now: number) => {
     hitVisible.value = false
     if (selectionTween || presentationTween) requestDraw()
   } else if (presentationTween) {
+    hitVisible.value = false
+    requestDraw()
+  } else if (shelfTransitionTween || shelfMoving.value) {
     hitVisible.value = false
     requestDraw()
   } else if (
@@ -405,7 +524,9 @@ const pixelsPerArticle = () => {
 const syncHorizontalRail = (position: number) => {
   if (!horizontalRail.value) return
   const nextPosition = clampPosition(position)
-  const left = nextPosition * horizontalPitch
+  const shelfStart = currentShelfArticleIndices.value[0] || 0
+  const localPosition = nextPosition - shelfStart
+  const left = localPosition * horizontalPitch
   lastHorizontalControlPosition = nextPosition
   if (Math.abs(horizontalRail.value.scrollLeft - left) <= 0.5) {
     expectedHorizontalScrollLeft = null
@@ -418,7 +539,10 @@ const syncHorizontalRail = (position: number) => {
 const updateHorizontalRailMetrics = () => {
   if (!stage.value || !horizontalRailContent.value) return
   horizontalPitch = pixelsPerArticle()
-  const span = Math.max(0, props.articles.length - 1) * horizontalPitch
+  const span = Math.max(
+    0,
+    currentShelfArticleIndices.value.length - 1,
+  ) * horizontalPitch
   horizontalRailContent.value.style.width = `${stage.value.clientWidth + span}px`
   if (!horizontalScrolling.value && !dragging.value) {
     syncHorizontalRail(currentIndex.value)
@@ -437,15 +561,20 @@ const measureTrack = () => {
 }
 
 const scrollTopForPosition = (position: number) => {
-  const denominator = Math.max(1, props.articles.length - 1)
-  return trackTop + (clampPosition(position) / denominator) * trackSpan
+  const denominator = Math.max(1, yearShelves.value.length - 1)
+  return trackTop + (clampShelfIndex(position) / denominator) * trackSpan
 }
 
-const scrollTopForIndex = (index: number) => scrollTopForPosition(clampIndex(index))
+const scrollTopForIndex = (index: number) => scrollTopForPosition(
+  shelfIndexForArticle(index),
+)
 
 const positionForScrollTop = (top: number) => {
   const progress = (top - trackTop) / trackSpan
-  return clampPosition(progress * Math.max(0, props.articles.length - 1))
+  return Math.min(
+    Math.max(0, progress * Math.max(0, yearShelves.value.length - 1)),
+    Math.max(0, yearShelves.value.length - 1),
+  )
 }
 
 const syncWindowScroll = (top: number) => {
@@ -461,10 +590,10 @@ const syncWindowScroll = (top: number) => {
 const releasedIndex = (anchorIndex: number, position: number) => {
   const delta = position - anchorIndex
   const magnitude = Math.abs(delta)
-  if (magnitude < switchThreshold) return clampIndex(anchorIndex)
+  if (magnitude < switchThreshold) return Math.round(clampPosition(anchorIndex))
 
   const steps = 1 + Math.floor(Math.max(0, magnitude - switchThreshold))
-  return clampIndex(anchorIndex + Math.sign(delta) * steps)
+  return Math.round(clampPosition(anchorIndex + Math.sign(delta) * steps))
 }
 
 const beginScrub = () => {
@@ -478,7 +607,7 @@ const beginScrub = () => {
 }
 
 const settleToCommitted = () => {
-  if (!ready.value || opening.value) return
+  if (!ready.value || opening.value || shelfMoving.value) return
 
   window.clearTimeout(scrollTimer)
   window.clearTimeout(horizontalScrollTimer)
@@ -494,6 +623,7 @@ const settleToCommitted = () => {
   horizontalScrolling.value = false
   verticalScrolling.value = false
   currentIndex.value = nextIndex
+  lastVisitedArticleByShelf.set(currentShelfIndex.value, nextIndex)
   presentationIndex = nextIndex
   targetPosition = nextIndex
   displayPosition = nextIndex
@@ -508,8 +638,8 @@ const settleToCommitted = () => {
 }
 
 const goToIndex = (index: number) => {
-  if (!ready.value || opening.value) return
-  const nextIndex = clampIndex(index)
+  if (!ready.value || opening.value || shelfMoving.value) return
+  const nextIndex = Math.round(clampPosition(index))
   window.clearTimeout(scrollTimer)
   window.clearTimeout(horizontalScrollTimer)
   window.clearTimeout(wheelTimer)
@@ -523,6 +653,7 @@ const goToIndex = (index: number) => {
   hitVisible.value = false
   void animatePresentation(0, 180)
   currentIndex.value = nextIndex
+  lastVisitedArticleByShelf.set(currentShelfIndex.value, nextIndex)
   targetPosition = nextIndex
   springVelocity = 0
   lastFrameTime = 0
@@ -531,27 +662,106 @@ const goToIndex = (index: number) => {
   requestDraw()
 }
 
+const goInShelf = (direction: -1 | 1) => {
+  const nextPosition = currentShelfArticlePosition.value + direction
+  const nextIndex = currentShelfArticleIndices.value[nextPosition]
+  if (nextIndex === undefined) return
+  goToIndex(nextIndex)
+}
+
+const goToShelf = async (
+  shelfIndex: number,
+  preferredArticleIndex?: number,
+) => {
+  if (!ready.value || opening.value || shelfMoving.value) return
+  const nextShelfIndex = clampShelfIndex(shelfIndex)
+  if (nextShelfIndex === currentShelfIndex.value) {
+    if (preferredArticleIndex !== undefined) goToIndex(preferredArticleIndex)
+    return
+  }
+
+  const targetShelf = yearShelves.value[nextShelfIndex]
+  if (!targetShelf?.articleIndices.length) return
+  const previousIndex = currentIndex.value
+  lastVisitedArticleByShelf.set(currentShelfIndex.value, previousIndex)
+  const rememberedIndex = lastVisitedArticleByShelf.get(nextShelfIndex)
+  const targetIndex = preferredArticleIndex !== undefined
+    && targetShelf.articleIndices.includes(preferredArticleIndex)
+    ? preferredArticleIndex
+    : rememberedIndex !== undefined
+      && targetShelf.articleIndices.includes(rememberedIndex)
+      ? rememberedIndex
+      : targetShelf.articleIndices[0]
+
+  shelfMoving.value = true
+  hitVisible.value = false
+  hovered = false
+  window.clearTimeout(scrollTimer)
+  window.clearTimeout(horizontalScrollTimer)
+  window.clearTimeout(wheelTimer)
+  wheelGestureActive = false
+  gestureSettlePending = false
+  scrubAnchorIndex = null
+  dragging.value = false
+  horizontalScrolling.value = false
+  verticalScrolling.value = false
+
+  await animatePresentation(0, 160)
+  if (disposed || !engine) return
+
+  currentShelfIndex.value = nextShelfIndex
+  currentIndex.value = targetIndex
+  lastVisitedArticleByShelf.set(nextShelfIndex, targetIndex)
+  presentationIndex = targetIndex
+  targetPosition = targetIndex
+  displayPosition = targetIndex
+  springVelocity = 0
+  cameraFromIndex = previousIndex
+  cameraToIndex = targetIndex
+  shelfTransitionProgress = 0
+  lastFrameTime = 0
+  updateHorizontalRailMetrics()
+  syncWindowScroll(scrollTopForIndex(targetIndex))
+  syncHorizontalRail(targetIndex)
+
+  await animateShelfTransition(shelfTransitionDuration)
+  if (disposed || !engine) return
+
+  cameraFromIndex = targetIndex
+  cameraToIndex = targetIndex
+  shelfTransitionProgress = 1
+  await animatePresentation(1, presentationDuration)
+  if (disposed || !engine) return
+
+  shelfMoving.value = false
+  announcedIndex.value = targetIndex
+  requestDraw()
+}
+
+const goToArticleIndex = (articleIndex: number) => {
+  const nextIndex = clampIndex(articleIndex)
+  const nextShelfIndex = shelfIndexForArticle(nextIndex)
+  if (nextShelfIndex === currentShelfIndex.value) {
+    goToIndex(nextIndex)
+  } else {
+    void goToShelf(nextShelfIndex, nextIndex)
+  }
+}
+
 const settleScroll = () => {
-  if (
-    opening.value
-    || !ready.value
-    || dragging.value
-    || horizontalScrolling.value
-    || !verticalScrolling.value
-  ) return
-  if (touchContactActive) {
-    gestureSettlePending = true
-    return
-  }
-  if (wheelGestureActive) {
-    gestureSettlePending = true
-    return
-  }
-  settleToCommitted()
+  if (!verticalScrolling.value) return
+  verticalScrolling.value = false
+  gestureSettlePending = false
 }
 
 const onScroll = () => {
-  if (!ready.value || opening.value || dragging.value || horizontalScrolling.value) return
+  if (
+    !ready.value
+    || opening.value
+    || dragging.value
+    || horizontalScrolling.value
+    || shelfMoving.value
+  ) return
   const nativePosition = positionForScrollTop(window.scrollY)
   if (expectedProgrammaticScrollTop !== null) {
     const expectedTop = expectedProgrammaticScrollTop
@@ -562,13 +772,12 @@ const onScroll = () => {
     }
   }
 
-  if (!verticalScrolling.value) {
-    beginScrub()
-    verticalScrolling.value = true
-  }
-  const delta = nativePosition - lastVerticalControlPosition
+  verticalScrolling.value = true
   lastVerticalControlPosition = nativePosition
-  setInteractivePosition(displayPosition + delta)
+  const nextShelfIndex = clampShelfIndex(nativePosition)
+  if (nextShelfIndex !== currentShelfIndex.value) {
+    void goToShelf(nextShelfIndex)
+  }
   window.clearTimeout(scrollTimer)
   scrollTimer = window.setTimeout(
     settleScroll,
@@ -609,6 +818,23 @@ const animatePresentation = (to: number, duration: number) => {
     presentationTween = {
       from: presentationProgress,
       to,
+      startedAt: performance.now(),
+      duration,
+      resolve,
+    }
+    requestDraw()
+  })
+}
+
+const animateShelfTransition = (duration: number) => {
+  if (shelfTransitionTween) {
+    shelfTransitionTween.resolve()
+    shelfTransitionTween = null
+  }
+  lastFrameTime = 0
+
+  return new Promise<void>((resolve) => {
+    shelfTransitionTween = {
       startedAt: performance.now(),
       duration,
       resolve,
@@ -747,8 +973,18 @@ const settleHorizontalScroll = () => {
 
 const onHorizontalRailScroll = () => {
   const rail = horizontalRail.value
-  if (!rail || !ready.value || opening.value || dragging.value || verticalScrolling.value) return
-  const nativePosition = clampPosition(rail.scrollLeft / Math.max(1, horizontalPitch))
+  if (
+    !rail
+    || !ready.value
+    || opening.value
+    || dragging.value
+    || verticalScrolling.value
+    || shelfMoving.value
+  ) return
+  const shelfStart = currentShelfArticleIndices.value[0] || 0
+  const nativePosition = clampPosition(
+    shelfStart + rail.scrollLeft / Math.max(1, horizontalPitch),
+  )
   if (expectedHorizontalScrollLeft !== null) {
     const expectedLeft = expectedHorizontalScrollLeft
     expectedHorizontalScrollLeft = null
@@ -841,7 +1077,7 @@ const activateFromSurface = (event: MouseEvent) => {
     activateCurrent(event)
     return
   }
-  goToIndex(pickedIndex)
+  goToArticleIndex(pickedIndex)
 }
 
 const activateCurrent = (event?: MouseEvent) => {
@@ -860,22 +1096,43 @@ const activateCurrent = (event?: MouseEvent) => {
 }
 
 const onKeydown = (event: KeyboardEvent) => {
-  const target = event.target as HTMLElement
-  if (target.matches('input, button, a')) return
+  if (
+    event.defaultPrevented
+    || event.isComposing
+    || event.metaKey
+    || event.ctrlKey
+    || event.altKey
+  ) return
 
-  if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+  const target = event.target instanceof HTMLElement ? event.target : null
+  if (target?.matches('input, textarea, select, [contenteditable="true"]')) return
+  const key = event.key.toLowerCase()
+  const stageHasFocus = Boolean(target && stage.value?.contains(target))
+  if (event.key === 'ArrowLeft' || key === 'a') {
     event.preventDefault()
-    goToIndex(currentIndex.value - 1)
-  } else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+    goInShelf(-1)
+  } else if (event.key === 'ArrowRight' || key === 'd') {
     event.preventDefault()
-    goToIndex(currentIndex.value + 1)
-  } else if (event.key === 'Home') {
+    goInShelf(1)
+  } else if (event.key === 'ArrowUp' || key === 'w') {
     event.preventDefault()
-    goToIndex(0)
-  } else if (event.key === 'End') {
+    void goToShelf(currentShelfIndex.value - 1)
+  } else if (event.key === 'ArrowDown' || key === 's') {
     event.preventDefault()
-    goToIndex(props.articles.length - 1)
-  } else if (event.key === 'Enter' || event.key === ' ') {
+    void goToShelf(currentShelfIndex.value + 1)
+  } else if (stageHasFocus && event.key === 'Home') {
+    event.preventDefault()
+    const firstIndex = currentShelfArticleIndices.value[0]
+    if (firstIndex !== undefined) goToIndex(firstIndex)
+  } else if (stageHasFocus && event.key === 'End') {
+    event.preventDefault()
+    const lastIndex = currentShelfArticleIndices.value.at(-1)
+    if (lastIndex !== undefined) goToIndex(lastIndex)
+  } else if (
+    stageHasFocus
+    && !target?.matches('button, a')
+    && (event.key === 'Enter' || event.key === ' ')
+  ) {
     event.preventDefault()
     activateCurrent()
   }
@@ -894,7 +1151,13 @@ const focusForOpen = async () => {
   dragging.value = false
   horizontalScrolling.value = false
   verticalScrolling.value = false
+  shelfMoving.value = false
   hovered = false
+  shelfTransitionTween?.resolve()
+  shelfTransitionTween = null
+  cameraFromIndex = currentIndex.value
+  cameraToIndex = currentIndex.value
+  shelfTransitionProgress = 1
   presentationTween?.resolve()
   presentationTween = null
   presentationIndex = currentIndex.value
@@ -921,6 +1184,10 @@ const finishReturnPose = async () => {
   targetPosition = currentIndex.value
   displayPosition = currentIndex.value
   springVelocity = 0
+  cameraFromIndex = currentIndex.value
+  cameraToIndex = currentIndex.value
+  shelfTransitionProgress = 1
+  shelfMoving.value = false
   syncWindowScroll(scrollTopForIndex(currentIndex.value))
   syncHorizontalRail(currentIndex.value)
   draw()
@@ -957,6 +1224,7 @@ const teardownScene = () => {
   window.removeEventListener('scroll', onScroll)
   window.removeEventListener('scrollend', settleScroll)
   window.removeEventListener('resize', measureTrack)
+  window.removeEventListener('keydown', onKeydown)
   document.removeEventListener('visibilitychange', requestDraw)
   dragGesture = null
   scrubAnchorIndex = null
@@ -971,6 +1239,7 @@ const teardownScene = () => {
   dragging.value = false
   horizontalScrolling.value = false
   verticalScrolling.value = false
+  shelfMoving.value = false
   document.documentElement.classList.remove('archive-scene-active')
   resizeObserver?.disconnect()
   resizeObserver = null
@@ -983,6 +1252,8 @@ const teardownScene = () => {
   selectionTween = null
   presentationTween?.resolve()
   presentationTween = null
+  shelfTransitionTween?.resolve()
+  shelfTransitionTween = null
   engine?.destroy()
   engine = null
 }
@@ -1087,9 +1358,14 @@ onMounted(async () => {
 
   track = stage.value.parentElement
   currentIndex.value = clampIndex(props.initialIndex)
+  currentShelfIndex.value = shelfIndexForArticle(currentIndex.value)
+  lastVisitedArticleByShelf.set(currentShelfIndex.value, currentIndex.value)
   announcedIndex.value = currentIndex.value
   targetPosition = currentIndex.value
   displayPosition = currentIndex.value
+  cameraFromIndex = currentIndex.value
+  cameraToIndex = currentIndex.value
+  shelfTransitionProgress = 1
   presentationIndex = currentIndex.value
   presentationProgress = 1
   selectionProgress = props.returning ? 1 : 0
@@ -1116,6 +1392,7 @@ onMounted(async () => {
   window.addEventListener('scroll', onScroll, { passive: true })
   window.addEventListener('scrollend', settleScroll, { passive: true })
   window.addEventListener('resize', measureTrack, { passive: true })
+  window.addEventListener('keydown', onKeydown)
   document.addEventListener('visibilitychange', requestDraw)
   document.documentElement.classList.add('archive-scene-active')
 
@@ -1218,7 +1495,7 @@ onBeforeUnmount(() => {
   right: max(1.25rem, env(safe-area-inset-right));
   left: max(1.25rem, env(safe-area-inset-left));
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
   font-weight: 620;
@@ -1264,6 +1541,11 @@ onBeforeUnmount(() => {
   font-size: 1.15rem;
   cursor: pointer;
   transform: translateY(-50%);
+  transition:
+    background-color 180ms cubic-bezier(0.25, 1, 0.5, 1),
+    color 180ms cubic-bezier(0.25, 1, 0.5, 1),
+    opacity 180ms cubic-bezier(0.25, 1, 0.5, 1),
+    transform 180ms cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 .archive-scene__arrow--previous {
@@ -1274,12 +1556,36 @@ onBeforeUnmount(() => {
   right: max(1rem, env(safe-area-inset-right));
 }
 
+.archive-scene__arrow--shelf {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.archive-scene__arrow--up {
+  top: max(
+    calc(var(--site-header-height, 47px) + env(safe-area-inset-top) + 0.75rem),
+    3.75rem
+  );
+}
+
+.archive-scene__arrow--down {
+  top: auto;
+  bottom: max(
+    calc(env(safe-area-inset-bottom) + 2.75rem),
+    2.75rem
+  );
+}
+
 .archive-scene__arrow:hover:not(:disabled) {
   background: var(--color-subtle);
 }
 
 .archive-scene__arrow:active:not(:disabled) {
   transform: translateY(-50%) scale(0.96);
+}
+
+.archive-scene__arrow--shelf:active:not(:disabled) {
+  transform: translateX(-50%) scale(0.96);
 }
 
 .archive-scene__arrow:focus-visible {
@@ -1328,7 +1634,8 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 44rem) {
-  .archive-scene__arrow {
+  .archive-scene__arrow--previous,
+  .archive-scene__arrow--next {
     top: auto;
     bottom: max(4.5rem, calc(env(safe-area-inset-bottom) + 4rem));
     width: 2.75rem;
@@ -1343,6 +1650,12 @@ onBeforeUnmount(() => {
   .archive-scene__hint {
     display: none;
   }
+
+  .archive-scene__arrow--shelf {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
 }
 
 @media (max-height: 36rem) and (orientation: landscape) {
@@ -1354,9 +1667,18 @@ onBeforeUnmount(() => {
     bottom: max(0.5rem, env(safe-area-inset-bottom));
   }
 
-  .archive-scene__arrow {
+  .archive-scene__arrow--previous,
+  .archive-scene__arrow--next {
     top: 52%;
     bottom: auto;
+  }
+
+  .archive-scene__arrow--up {
+    top: 4rem;
+  }
+
+  .archive-scene__arrow--down {
+    bottom: 2.5rem;
   }
 }
 

@@ -12,6 +12,7 @@ import {
   LinearFilter,
   Matrix4,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   Object3D,
   PerspectiveCamera,
@@ -32,6 +33,9 @@ export interface ArchiveSceneArticle {
 export interface ArchiveSceneFrame {
   position: number
   selectedIndex: number
+  cameraFromIndex: number
+  cameraToIndex: number
+  shelfTransitionProgress: number
   presentationProgress: number
   selectionProgress: number
   hovered: boolean
@@ -81,6 +85,7 @@ const caseDepth = 0.64
 const spinePitch = 0.88
 const shelfY = -0.28
 const shelfZ = -1.3
+const shelfVerticalPitch = 7.8
 const pullDistance = 3.3
 const browsingPullRatio = 0.15
 const turnStart = 0.58
@@ -476,6 +481,32 @@ const paintLabel = (
   label.texture.needsUpdate = true
 }
 
+const createYearLabelTexture = (
+  year: string,
+  titleFontFamily: string,
+) => {
+  const canvas = document.createElement('canvas')
+  canvas.width = 256
+  canvas.height = 80
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Canvas 2D is unavailable')
+
+  context.clearRect(0, 0, canvas.width, canvas.height)
+  context.fillStyle = '#666d74'
+  context.font = `500 34px ${titleFontFamily}`
+  context.textAlign = 'center'
+  context.textBaseline = 'middle'
+  context.fillText(year, canvas.width / 2, canvas.height / 2)
+
+  const texture = new CanvasTexture(canvas)
+  texture.colorSpace = SRGBColorSpace
+  texture.generateMipmaps = false
+  texture.minFilter = LinearFilter
+  texture.magFilter = LinearFilter
+  texture.needsUpdate = true
+  return texture
+}
+
 export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEngine => {
   const {
     canvas,
@@ -609,6 +640,27 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
   const raycaster = new Raycaster()
   const projectedPoint = new Vector3()
   const cameraTarget = new Vector3()
+  const shelfGroups: Array<{
+    year: string
+    articleIndices: number[]
+  }> = []
+  const shelfIndexByArticle = new Array<number>(articles.length).fill(0)
+  const shelfByYear = new Map<string, number>()
+  articles.forEach((article, articleIndex) => {
+    const parsedYear = new Date(article.date).getFullYear()
+    const year = Number.isNaN(parsedYear) ? '—' : String(parsedYear)
+    let shelfIndex = shelfByYear.get(year)
+    if (shelfIndex === undefined) {
+      shelfIndex = shelfGroups.length
+      shelfByYear.set(year, shelfIndex)
+      shelfGroups.push({ year, articleIndices: [] })
+    }
+    shelfGroups[shelfIndex].articleIndices.push(articleIndex)
+    shelfIndexByArticle[articleIndex] = shelfIndex
+  })
+  const shelfCenterYPositions = shelfGroups.map(
+    (_, shelfIndex) => shelfY - shelfIndex * shelfVerticalPitch,
+  )
   // Stable per-article variation reads as physical manufacturing/casual shelf
   // placement while preserving batching and avoiding layout shifts on return.
   const caseScales = articles.map((_, articleIndex) => ({
@@ -644,6 +696,13 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
   const shelfXPositions = new Array<number>(articles.length).fill(0)
   const baseSpineGap = spinePitch - caseDepth
   for (let articleIndex = 1; articleIndex < articles.length; articleIndex++) {
+    if (
+      shelfIndexByArticle[articleIndex]
+      !== shelfIndexByArticle[articleIndex - 1]
+    ) {
+      shelfXPositions[articleIndex] = 0
+      continue
+    }
     const previousScale = caseScales[articleIndex - 1]
     const currentScale = caseScales[articleIndex]
     const variedGap = baseSpineGap
@@ -652,7 +711,6 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
       + caseDepth * (previousScale.z + currentScale.z) / 2
       + variedGap
   }
-  const shelfBaseY = shelfY - caseHeight / 2
   const shelfYPositions = articles.map((_, articleIndex) => {
     const caseScale = caseScales[articleIndex]
     const yaw = caseYawAngles[articleIndex]
@@ -662,7 +720,10 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
       + caseWidth * caseScale.x / 2 * Math.abs(Math.sin(yaw))
     const leanedHalfHeight = halfHeight * Math.cos(lean)
       + halfShelfWidth * Math.abs(Math.sin(lean))
-    return shelfBaseY + leanedHalfHeight
+    const shelfCenterY = shelfCenterYPositions[
+      shelfIndexByArticle[articleIndex]
+    ] ?? shelfY
+    return shelfCenterY - caseHeight / 2 + leanedHalfHeight
   })
   const restMatrices = articles.map((_, articleIndex) => {
     const caseScale = caseScales[articleIndex]
@@ -695,6 +756,26 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
   shelfSpineMesh.frustumCulled = false
   scene.add(shelfSpineMesh)
 
+  const yearLabelGeometry = new PlaneGeometry(1.3, 0.4)
+  const yearLabels = shelfGroups.map((shelf, shelfIndex) => {
+    const texture = createYearLabelTexture(shelf.year, titleFontFamily)
+    texture.anisotropy = textureAnisotropy
+    const yearMaterial = new MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false,
+    })
+    const mesh = new Mesh(yearLabelGeometry, yearMaterial)
+    mesh.position.set(
+      -2.35,
+      (shelfCenterYPositions[shelfIndex] ?? shelfY) + 1.65,
+      shelfZ + 0.2,
+    )
+    mesh.frustumCulled = false
+    scene.add(mesh)
+    return { material: yearMaterial, texture }
+  })
+
   // The two cases crossing the active selection boundary leave the static
   // batch and receive tiny dynamic quads that share the same atlas/material.
   const activeSpineGeometries = [0, 1].map(
@@ -715,6 +796,9 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
   let currentFrame: ArchiveSceneFrame = {
     position: 0,
     selectedIndex: 0,
+    cameraFromIndex: 0,
+    cameraToIndex: 0,
+    shelfTransitionProgress: 1,
     presentationProgress: 1,
     selectionProgress: 0,
     hovered: false,
@@ -782,18 +866,63 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
       smootherstep(0.42, 1, upperPresentation),
       handoff,
     )
-    const focusX = mix(
+    let focusX = mix(
       shelfXPositions[lower],
       shelfXPositions[upper],
       handoff,
     ) - 0.1 * turn
-    const focusBaseY = mix(
+    let focusBaseY = mix(
       shelfYPositions[lower],
       shelfYPositions[upper],
       handoff,
     )
-    const focusY = focusBaseY + 0.56 * lift
-    const focusZ = shelfZ + pullDistance * slide
+    let focusShelfCenterY = mix(
+      shelfCenterYPositions[shelfIndexByArticle[lower]] ?? shelfY,
+      shelfCenterYPositions[shelfIndexByArticle[upper]] ?? shelfY,
+      handoff,
+    )
+    let cameraSlide = slide
+    let cameraTurn = turn
+    let cameraLift = lift
+    if (frame.shelfTransitionProgress < 0.999) {
+      const fromIndex = clamp(
+        Math.round(frame.cameraFromIndex),
+        0,
+        articles.length - 1,
+      )
+      const toIndex = clamp(
+        Math.round(frame.cameraToIndex),
+        0,
+        articles.length - 1,
+      )
+      const transition = smootherstep(
+        0,
+        1,
+        frame.shelfTransitionProgress,
+      )
+      focusX = mix(
+        shelfXPositions[fromIndex],
+        shelfXPositions[toIndex],
+        transition,
+      )
+      focusBaseY = mix(
+        shelfYPositions[fromIndex],
+        shelfYPositions[toIndex],
+        transition,
+      )
+      focusShelfCenterY = mix(
+        shelfCenterYPositions[shelfIndexByArticle[fromIndex]] ?? shelfY,
+        shelfCenterYPositions[shelfIndexByArticle[toIndex]] ?? shelfY,
+        transition,
+      )
+      cameraSlide = browsingPullRatio
+      cameraTurn = 0
+      cameraLift = 0
+    }
+
+    focusX -= 0.1 * (cameraTurn - turn)
+    const focusY = focusBaseY + 0.56 * cameraLift
+    const focusZ = shelfZ + pullDistance * cameraSlide
     const selected = smootherstep(0, 1, frame.selectionProgress)
     const shoulder = camera.aspect < 0.72 ? 0.18 : 0.3
     const browsingCameraX = focusX + shoulder
@@ -801,9 +930,7 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
     cameraTarget.set(focusX, focusY, focusZ)
     camera.position.set(
       mix(browsingCameraX, focusX, selected),
-      // The camera translates along X only. Y/Z stay locked while its look-at
-      // target follows the case's physical extraction path.
-      cameraY,
+      focusShelfCenterY + (cameraY - shelfY),
       shelfZ + cameraDistance + cameraDepthOffset,
     )
     camera.lookAt(cameraTarget)
@@ -1300,6 +1427,11 @@ export const createArchiveScene = (options: ArchiveSceneOptions): ArchiveSceneEn
       material.dispose()
       labelGeometry.dispose()
       shelfSpineGeometry.dispose()
+      yearLabelGeometry.dispose()
+      yearLabels.forEach(({ material: yearMaterial, texture }) => {
+        yearMaterial.dispose()
+        texture.dispose()
+      })
       activeSpineGeometries.forEach((spineGeometry) => spineGeometry.dispose())
       labels.forEach((label) => label.texture.dispose())
       spineAtlas.texture.dispose()
