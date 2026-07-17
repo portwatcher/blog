@@ -768,6 +768,7 @@ const unlock = async function () {
 @media (max-width: 640px) {
   .post {
     width: 100%;
+    overflow-x: clip;
     font-size: 1.125rem;
     line-height: 1.9;
     word-spacing: 0.03em;
