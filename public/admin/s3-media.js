@@ -9,6 +9,8 @@
   }
 
   var cachedConfig = null;
+  var uploadTokenPrompt = null;
+  var activeMediaDialogHide = null;
 
   function valueToJS(value) {
     if (!value) return {};
@@ -285,6 +287,21 @@
     if (token) window.sessionStorage.setItem('blogCmsUploadToken', token);
   }
 
+  function promptForUploadToken() {
+    if (uploadTokenPrompt) return uploadTokenPrompt;
+
+    uploadTokenPrompt = Promise.resolve(window.prompt('CMS upload token'))
+      .then(function (token) {
+        if (token) setUploadToken(token);
+        return token || '';
+      })
+      .finally(function () {
+        uploadTokenPrompt = null;
+      });
+
+    return uploadTokenPrompt;
+  }
+
   function getCmsAuthHeaders() {
     var headers = {};
     var token = getUploadToken();
@@ -296,6 +313,7 @@
 
   async function cmsFetchJson(url, options, retried) {
     var requestOptions = options || {};
+    var requestUploadToken = getUploadToken();
     var headers = Object.assign({}, requestOptions.headers || {}, getCmsAuthHeaders());
 
     var response = await fetch(url, {
@@ -305,11 +323,14 @@
     });
 
     if (response.status === 401 && !retried) {
-      var nextToken = window.prompt('CMS upload token');
-      if (nextToken) {
-        setUploadToken(nextToken);
+      // Another request may have already refreshed the token while this
+      // request was in flight. Reuse it instead of prompting again.
+      if (getUploadToken() !== requestUploadToken) {
         return cmsFetchJson(url, options, true);
       }
+
+      var nextToken = await promptForUploadToken();
+      if (nextToken) return cmsFetchJson(url, options, true);
     }
 
     if (!response.ok) {
@@ -930,6 +951,8 @@
   }
 
   function openMediaAssetsDialog(dialogOptions) {
+    if (activeMediaDialogHide) activeMediaDialogHide();
+
     var options = dialogOptions || {};
     var handleInsert = options.handleInsert;
     var onSelect = options.onSelect;
@@ -1027,6 +1050,8 @@
     }
 
     function render() {
+      if (!overlay) return;
+
       var selected = selectedAsset();
       var canUseSelected = !!selected;
       var canInsert = canUseSelected && (!!onSelect || (state.insertMode && !!handleInsert));
@@ -1091,6 +1116,7 @@
     function hide() {
       if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
       overlay = null;
+      if (activeMediaDialogHide === hide) activeMediaDialogHide = null;
     }
 
     async function copySelected() {
@@ -1170,6 +1196,7 @@
     overlay = document.createElement('div');
     overlay.className = 'blog-cms-media-library';
     document.body.appendChild(overlay);
+    activeMediaDialogHide = hide;
     render();
     loadAssets();
 
