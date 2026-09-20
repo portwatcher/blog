@@ -239,7 +239,7 @@ const applyMarkdownImageLayout = async () => {
 
   document.querySelectorAll<HTMLImageElement>('.markdown img').forEach((image) => {
     const updateImageOrientation = () => {
-      image.classList.toggle('markdown-image-tall', image.naturalHeight > image.naturalWidth)
+      image.classList.toggle('markdown-image-wide', image.naturalWidth > image.naturalHeight)
     }
 
     if (image.complete && image.naturalWidth && image.naturalHeight) {
@@ -539,14 +539,16 @@ const unlock = async function () {
   width: 100% !important;
   max-width: 100% !important;
   height: auto !important;
+  max-height: none !important;
   margin: 2rem auto;
   object-fit: contain;
   border-radius: 0.375rem;
 }
 
-.markdown img.markdown-image-tall {
+.markdown img.markdown-image-wide {
   width: auto !important;
-  max-height: 40vh !important;
+  height: 100vh !important;
+  height: 100dvh !important;
 }
 
 .post code {
