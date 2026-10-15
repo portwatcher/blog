@@ -223,8 +223,10 @@ const languageRoute = (lang: string) => {
   }
 }
 
-const applyMarkdownImageLayout = async () => {
-  if (!import.meta.client) return
+const applyMarkdownEmbedLayout = async () => {
+  if (!import.meta.client) {
+    return
+  }
 
   await nextTick()
 
@@ -235,19 +237,6 @@ const applyMarkdownImageLayout = async () => {
     if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
       iframe.style.setProperty('--markdown-embed-ratio', `${width} / ${height}`)
     }
-  })
-
-  document.querySelectorAll<HTMLImageElement>('.markdown img').forEach((image) => {
-    const updateImageOrientation = () => {
-      image.classList.toggle('markdown-image-wide', image.naturalWidth > image.naturalHeight)
-    }
-
-    if (image.complete && image.naturalWidth && image.naturalHeight) {
-      updateImageOrientation()
-      return
-    }
-
-    image.addEventListener('load', updateImageOrientation, { once: true })
   })
 }
 
@@ -296,7 +285,7 @@ onMounted(async () => {
     || isArchiveHistoryPath(historyState.back),
   )
   ensureArchiveReturnEntry()
-  void applyMarkdownImageLayout()
+  void applyMarkdownEmbedLayout()
   await nextTick()
   const routeTitle = getRouteTitle(route.params.title)
   if (document.fonts?.status !== 'loaded') {
@@ -543,12 +532,6 @@ const unlock = async function () {
   margin: 2rem auto;
   object-fit: contain;
   border-radius: 0.375rem;
-}
-
-.markdown img.markdown-image-wide {
-  width: auto !important;
-  height: 100vh !important;
-  height: 100dvh !important;
 }
 
 .post code {

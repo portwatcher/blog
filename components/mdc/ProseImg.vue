@@ -55,8 +55,10 @@ const normalizedSrc = computed(() => {
 <style scoped>
 img {
   display: block;
+  width: 100%;
   max-width: 100%;
   height: auto;
+  max-height: none;
   margin: 2rem auto;
   border-radius: 0.375rem;
 }
