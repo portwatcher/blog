@@ -37,6 +37,25 @@ Open `http://localhost:3000`.
 
 The app can run against local Markdown under `content/`, but production-style usage expects a separate content repository.
 
+## Archive 3D Interaction
+
+The archive's 3D view starts with no book selected. Drag horizontally or vertically,
+use a touch swipe, or scroll to browse continuously. Movement slows near each book;
+keep moving to put it back and pass to the next one. Release within the selection
+zone to hold that book, or stop between books with nothing selected. New input can
+interrupt settling immediately.
+
+Click a spine to select it, then click the presented book to open the article.
+Arrow keys / A D select articles, Up / Down / W S change year shelves, and Escape
+puts the book back. Reduced motion, forced colors, save-data and unavailable WebGL
+fall back to the article list.
+
+Run the navigation behavior checks with Node.js 22.18+:
+
+```bash
+node --test tests/archive-navigation.test.mjs
+```
+
 ## Content Repo
 
 Content lives in a separate Git repository. This app repo owns Nuxt, Decap, media upload endpoints, the Docker image recipe, and reusable deployment examples. Each site owner should keep real deployment credentials and infrastructure state in their own private repo.

@@ -6,7 +6,6 @@ export const shelfY = -0.28
 export const shelfZ = -1.3
 export const shelfVerticalPitch = 7.8
 export const pullDistance = 3.3
-export const browsingPullRatio = 0.15
 export const turnStart = 0.58
 export const cameraDepthOffset = pullDistance * 0.42
 export const alignedCameraOffset = pullDistance - cameraDepthOffset

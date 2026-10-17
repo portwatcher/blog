@@ -98,6 +98,9 @@ export const createArchiveSceneInteraction = (
 
   const getActiveRects = (): ArchiveSceneRects => {
     const frame = getFrame()
+    if (frame.selectedIndex === null) {
+      return { surfaceRect: new DOMRect(), titleRect: new DOMRect() }
+    }
     const pose = motion.getPose(frame.selectedIndex, frame)
     const surfaceRect = projectBounds(
       pose.matrix,

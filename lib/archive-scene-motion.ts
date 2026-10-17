@@ -7,17 +7,18 @@ import type {
   PerspectiveCamera,
 } from 'three'
 import {
-  browsingPullRatio,
   cameraDepthOffset,
   cameraY,
   clamp,
   mix,
   pullDistance,
   shelfY,
+  spinePitch,
   shelfZ,
   smootherstep,
   turnStart,
 } from './archive-scene-constants'
+import { archivePresentationAt } from './archive-navigation'
 import type { ArchiveSceneLayout } from './archive-scene-layout'
 import type {
   ArchiveCasePose,
@@ -25,7 +26,6 @@ import type {
 } from './archive-scene-types'
 
 interface ArchiveSceneMotionOptions {
-  articleCount: number
   camera: PerspectiveCamera
   fillLight: DirectionalLight
   keyLight: DirectionalLight
@@ -36,7 +36,6 @@ export const createArchiveSceneMotion = (
   options: ArchiveSceneMotionOptions,
 ) => {
   const {
-    articleCount,
     camera,
     fillLight,
     keyLight,
@@ -64,128 +63,59 @@ export const createArchiveSceneMotion = (
 
   displayRotationObject.rotation.set(-0.16, 0.4, -0.1, 'XYZ')
 
-  const browsingWeightForDistance = (distance: number) =>
-    distance >= 1 ? 0 : 1 - smootherstep(0, 1, distance)
+  const smoothedTarget = new Vector3()
+  let smoothedShelfY = shelfY
+  let cameraInitialized = false
 
-  const presentationForIndex = (
-    articleIndex: number,
-    frame: ArchiveSceneFrame,
-  ) => articleIndex === frame.selectedIndex
-    ? smootherstep(0, 1, frame.presentationProgress)
-    : 0
+  const presentationForIndex = (articleIndex: number, frame: ArchiveSceneFrame) =>
+    archivePresentationAt(frame.position, articleIndex)
 
-  const slideForIndex = (
-    articleIndex: number,
-    frame: ArchiveSceneFrame,
-    presentation: number,
-  ) => {
-    const browsingSlide = browsingPullRatio
-      * browsingWeightForDistance(Math.abs(articleIndex - frame.position))
-    return mix(
-      browsingSlide,
-      1,
-      smootherstep(0, 0.72, presentation),
-    )
-  }
+  const slideForPresentation = (presentation: number) =>
+    smootherstep(0, 0.72, presentation)
 
   const updateCamera = (frame: ArchiveSceneFrame) => {
-    const lower = clamp(Math.floor(frame.position), 0, articleCount - 1)
-    const upper = clamp(Math.ceil(frame.position), 0, articleCount - 1)
+    const lower = clamp(Math.floor(frame.position), frame.firstIndex, frame.lastIndex)
+    const upper = clamp(Math.ceil(frame.position), frame.firstIndex, frame.lastIndex)
     const fraction = clamp(frame.position - lower, 0, 1)
-    const handoff = lower === upper
-      ? 0
-      : smootherstep(0.38, 0.62, fraction)
     const lowerPresentation = presentationForIndex(lower, frame)
     const upperPresentation = presentationForIndex(upper, frame)
-    const slide = mix(
-      slideForIndex(lower, frame, lowerPresentation),
-      slideForIndex(upper, frame, upperPresentation),
-      handoff,
-    )
-    const turn = mix(
-      smootherstep(turnStart, 1, lowerPresentation),
-      smootherstep(turnStart, 1, upperPresentation),
-      handoff,
-    )
-    const lift = mix(
-      smootherstep(0.42, 1, lowerPresentation),
-      smootherstep(0.42, 1, upperPresentation),
-      handoff,
-    )
-    let focusX = mix(
-      shelfXPositions[lower],
-      shelfXPositions[upper],
-      handoff,
-    ) - 0.1 * turn
-    let focusBaseY = mix(
-      shelfYPositions[lower],
-      shelfYPositions[upper],
-      handoff,
-    )
-    let focusShelfCenterY = mix(
-      shelfCenterYPositions[shelfIndexByArticle[lower]] ?? shelfY,
-      shelfCenterYPositions[shelfIndexByArticle[upper]] ?? shelfY,
-      handoff,
-    )
-    let cameraSlide = slide
-    let cameraTurn = turn
-    let cameraLift = lift
-
-    if (frame.shelfTransitionProgress < 0.999) {
-      const fromIndex = clamp(
-        Math.round(frame.cameraFromIndex),
-        0,
-        articleCount - 1,
-      )
-      const toIndex = clamp(
-        Math.round(frame.cameraToIndex),
-        0,
-        articleCount - 1,
-      )
-      const transition = smootherstep(
-        0,
-        1,
-        frame.shelfTransitionProgress,
-      )
-      focusX = mix(
-        shelfXPositions[fromIndex],
-        shelfXPositions[toIndex],
-        transition,
-      )
-      focusBaseY = mix(
-        shelfYPositions[fromIndex],
-        shelfYPositions[toIndex],
-        transition,
-      )
-      focusShelfCenterY = mix(
-        shelfCenterYPositions[shelfIndexByArticle[fromIndex]] ?? shelfY,
-        shelfCenterYPositions[shelfIndexByArticle[toIndex]] ?? shelfY,
-        transition,
-      )
-      cameraSlide = browsingPullRatio
-      cameraTurn = 0
-      cameraLift = 0
+    const presentation = Math.max(lowerPresentation, upperPresentation)
+    const turn = smootherstep(turnStart, 1, presentation)
+    const lift = smootherstep(0.42, 1, presentation)
+    // Linear shelf tracking has no stationary sections or handoff discontinuity.
+    const edgeOffset = (frame.position - clamp(
+      frame.position, frame.firstIndex, frame.lastIndex,
+    )) * spinePitch
+    const focusX = mix(shelfXPositions[lower], shelfXPositions[upper], fraction)
+      + edgeOffset - 0.1 * turn
+    const focusY = mix(shelfYPositions[lower], shelfYPositions[upper], fraction)
+      + 0.56 * lift
+    const focusZ = shelfZ + pullDistance * slideForPresentation(presentation)
+    const shelfCenter = shelfCenterYPositions[shelfIndexByArticle[lower]] ?? shelfY
+    cameraTarget.set(focusX, focusY, focusZ)
+    const follow = cameraInitialized ? 1 - Math.exp(-26 * frame.deltaSeconds) : 1
+    smoothedTarget.lerp(cameraTarget, follow)
+    smoothedShelfY = mix(smoothedShelfY, shelfCenter, follow)
+    cameraInitialized = true
+    const moving = smoothedTarget.distanceToSquared(cameraTarget) > 0.000001
+      || Math.abs(smoothedShelfY - shelfCenter) > 0.001
+    if (!moving) {
+      smoothedTarget.copy(cameraTarget)
+      smoothedShelfY = shelfCenter
     }
-
-    focusX -= 0.1 * (cameraTurn - turn)
-    const focusY = focusBaseY + 0.56 * cameraLift
-    const focusZ = shelfZ + pullDistance * cameraSlide
     const selected = smootherstep(0, 1, frame.selectionProgress)
     const shoulder = camera.aspect < 0.72 ? 0.18 : 0.3
-    const browsingCameraX = focusX + shoulder
-
-    cameraTarget.set(focusX, focusY, focusZ)
     camera.position.set(
-      mix(browsingCameraX, focusX, selected),
-      focusShelfCenterY + (cameraY - shelfY),
+      smoothedTarget.x + shoulder * (1 - selected),
+      smoothedShelfY + (cameraY - shelfY),
       shelfZ + cameraDistance + cameraDepthOffset,
     )
-    camera.lookAt(cameraTarget)
-
-    keyLight.position.set(focusX - 4.5, focusY + 6, focusZ + 7)
-    keyLight.target.position.copy(cameraTarget)
-    fillLight.position.set(focusX + 5, focusY - 1.5, focusZ + 4)
-    fillLight.target.position.copy(cameraTarget)
+    camera.lookAt(smoothedTarget)
+    keyLight.position.set(smoothedTarget.x - 4.5, smoothedTarget.y + 6, smoothedTarget.z + 7)
+    keyLight.target.position.copy(smoothedTarget)
+    fillLight.position.set(smoothedTarget.x + 5, smoothedTarget.y - 1.5, smoothedTarget.z + 4)
+    fillLight.target.position.copy(smoothedTarget)
+    return moving
   }
 
   const getPose = (
@@ -194,7 +124,7 @@ export const createArchiveSceneMotion = (
   ): ArchiveCasePose => {
     const presented = articleIndex === frame.selectedIndex
     const presentation = presentationForIndex(articleIndex, frame)
-    const slide = slideForIndex(articleIndex, frame, presentation)
+    const slide = slideForPresentation(presentation)
     const turn = smootherstep(turnStart, 1, presentation)
     const lift = smootherstep(0.42, 1, presentation)
     const selected = presented ? frame.selectionProgress : 0

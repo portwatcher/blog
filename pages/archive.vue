@@ -34,7 +34,7 @@
       </button>
     </div>
 
-    <div v-if="articles.length" class="archive__track" :style="trackStyle">
+    <div v-if="articles.length" class="archive__track">
       <ArchiveScene
         v-if="archiveView === '3d'"
         :articles="articles"
@@ -42,7 +42,6 @@
         :returning="returning"
         @activate="openArticle"
         @mode="setSceneMode"
-        @shelf-change="setActiveShelfArticleCount"
         @ready="onSceneReady"
       />
 
@@ -105,7 +104,6 @@ const { data } = await useFetch<Article[]>('/api/articles', {
 
 const articles = computed(() => data.value || [])
 const sceneMode = ref<'pending' | 'webgl' | 'fallback'>('pending')
-const activeShelfArticleCount = ref(0)
 const archiveView = useRouteQueryState<ArchiveView>({
   key: 'view',
   defaultValue: 'list',
@@ -151,17 +149,6 @@ const initialIndex = computed(() => {
     Math.max(0, articles.value.length - 1),
   )
 })
-const setActiveShelfArticleCount = (articleCount: number) => {
-  activeShelfArticleCount.value = Math.max(0, Math.floor(articleCount))
-}
-const trackStyle = computed(() => {
-  const firstShelfArticleCount = yearGroups.value[0]?.[1].length || 0
-  const articleCount = activeShelfArticleCount.value || firstShelfArticleCount
-  return {
-    '--archive-scroll-span': `${Math.max(0, articleCount - 1) * 220}px`,
-  }
-})
-
 const articleLocation = (article: Article) => ({
   name: 'articles-title',
   params: { title: getArticleRouteTitle(article) },
@@ -410,8 +397,8 @@ useSeoMeta({
 }
 
 .archive--webgl .archive__track {
-  min-height: calc(100vh + var(--archive-scroll-span, 0px));
-  min-height: calc(100svh + var(--archive-scroll-span, 0px));
+  min-height: 100vh;
+  min-height: 100svh;
 }
 
 .archive--3d:not(.archive--webgl) :deep(.archive-scene) {

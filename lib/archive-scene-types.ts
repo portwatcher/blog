@@ -7,11 +7,10 @@ export interface ArchiveSceneArticle {
 
 export interface ArchiveSceneFrame {
   position: number
-  selectedIndex: number
-  cameraFromIndex: number
-  cameraToIndex: number
-  shelfTransitionProgress: number
-  presentationProgress: number
+  selectedIndex: number | null
+  firstIndex: number
+  lastIndex: number
+  deltaSeconds: number
   selectionProgress: number
   hovered: boolean
 }
@@ -22,7 +21,7 @@ export interface ArchiveSceneRects {
 }
 
 export interface ArchiveSceneEngine {
-  draw: (frame: ArchiveSceneFrame) => void
+  draw: (frame: ArchiveSceneFrame) => boolean
   getActiveRects: () => ArchiveSceneRects
   pickArticleAt: (clientX: number, clientY: number) => number | null
   refreshTypography: () => void

@@ -236,19 +236,17 @@ export const createArchiveScene = (
     return mesh
   })
   const motion = createArchiveSceneMotion({
-    articleCount: articles.length,
     camera,
     fillLight,
     keyLight,
     layout,
   })
   let currentFrame: ArchiveSceneFrame = {
-    position: 0,
-    selectedIndex: 0,
-    cameraFromIndex: 0,
-    cameraToIndex: 0,
-    shelfTransitionProgress: 1,
-    presentationProgress: 1,
+    position: -0.5,
+    selectedIndex: null,
+    firstIndex: 0,
+    lastIndex: articles.length - 1,
+    deltaSeconds: 1,
     selectionProgress: 0,
     hovered: false,
   }
@@ -518,9 +516,9 @@ export const createArchiveScene = (
 
   const draw = (frame: ArchiveSceneFrame) => {
     currentFrame = frame
-    motion.updateCamera(frame)
-    const lower = clamp(Math.floor(frame.position), 0, articles.length - 1)
-    const upper = clamp(Math.ceil(frame.position), 0, articles.length - 1)
+    const cameraMoving = motion.updateCamera(frame)
+    const lower = clamp(Math.floor(frame.position), frame.firstIndex, frame.lastIndex)
+    const upper = clamp(Math.ceil(frame.position), frame.firstIndex, frame.lastIndex)
     const secondIndex = upper === lower ? -1 : upper
     syncActiveShelfSpines(lower, secondIndex)
     syncActiveShelfCases(lower, secondIndex)
@@ -529,6 +527,7 @@ export const createArchiveScene = (
     setActiveSpineLabels(lower, upper, frame)
     setActiveLabels(lower, upper, frame)
     renderer.render(scene, camera)
+    return cameraMoving
   }
 
   const interaction = createArchiveSceneInteraction({
