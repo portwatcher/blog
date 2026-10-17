@@ -78,7 +78,7 @@ export const createArchiveNavigation = (first: number, last: number) => {
     advance(seconds: number) {
       const before = travel
       if (target !== null) {
-        travel = target + (travel - target) * Math.exp(-22 * seconds)
+        travel = target + (travel - target) * Math.exp(-14 * seconds)
         if (Math.abs(travel - target) < 0.0001) {
           travel = target
           target = null

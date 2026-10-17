@@ -407,6 +407,13 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
         locale: locale.value, archiveLabel: t('archive'),
         titleFontFamily: styles.getPropertyValue('--font-serif').trim() || 'sans-serif',
         backgroundColor: cssColorToNumber(styles.backgroundColor),
+        theme: {
+          surface: cssColorToNumber(styles.getPropertyValue('--color-surface')),
+          subtle: cssColorToNumber(styles.getPropertyValue('--color-subtle')),
+          heading: cssColorToNumber(styles.getPropertyValue('--color-heading')),
+          muted: cssColorToNumber(styles.getPropertyValue('--color-muted')),
+          border: cssColorToNumber(styles.getPropertyValue('--color-border')),
+        },
       })
       void document.fonts.ready.then(() => {
         engine?.refreshTypography()

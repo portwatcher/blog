@@ -71,7 +71,9 @@ export const createArchiveSceneMotion = (
     archivePresentationAt(frame.position, articleIndex)
 
   const slideForPresentation = (presentation: number) =>
-    smootherstep(0, 0.72, presentation)
+    // Spread extraction across more of the approach, while leaving enough
+    // clearance before the cover turns past its neighbors.
+    smootherstep(0, 0.88, presentation)
 
   const updateCamera = (frame: ArchiveSceneFrame) => {
     const lower = clamp(Math.floor(frame.position), frame.firstIndex, frame.lastIndex)

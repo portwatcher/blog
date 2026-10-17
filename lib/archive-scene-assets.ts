@@ -4,6 +4,7 @@ import {
   DynamicDrawUsage,
   Float32BufferAttribute,
   LinearFilter,
+  LinearMipmapLinearFilter,
   Matrix4,
   SRGBColorSpace,
   Vector3,
@@ -12,15 +13,15 @@ import {
   clamp,
   labelLogicalHeight,
   labelLogicalWidth,
-  labelTextureScale,
   spineAtlasCellHeight,
   spineAtlasCellWidth,
-  spineAtlasTextureScale,
   spineLabelHeight,
   spineLabelWidth,
   spineTitleMaxFontSize,
   spineTitleMinFontSize,
 } from './archive-scene-constants'
+import { paintArchivePaper } from './archive-scene-books'
+import type { ArchiveBookStyle } from './archive-scene-books'
 import type {
   ArchiveSceneArticle,
   ArchiveTitleBounds,
@@ -93,20 +94,20 @@ const wrapTitle = (
   return lines
 }
 
-export const createArchiveLabel = () => {
+export const createArchiveLabel = (lowPower: boolean, maxTextureSize: number) => {
+  const scale = Math.min(lowPower ? 2 : 3, maxTextureSize / labelLogicalHeight)
   const canvas = document.createElement('canvas')
-  canvas.width = labelLogicalWidth * labelTextureScale
-  canvas.height = labelLogicalHeight * labelTextureScale
+  canvas.width = Math.round(labelLogicalWidth * scale)
+  canvas.height = Math.round(labelLogicalHeight * scale)
   const context = canvas.getContext('2d', { alpha: false })
   if (!context) {
     throw new Error('Canvas 2D is unavailable')
   }
-  context.scale(labelTextureScale, labelTextureScale)
+  context.scale(canvas.width / labelLogicalWidth, canvas.height / labelLogicalHeight)
 
   const texture = new CanvasTexture(canvas)
   texture.colorSpace = SRGBColorSpace
-  texture.generateMipmaps = false
-  texture.minFilter = LinearFilter
+  texture.minFilter = LinearMipmapLinearFilter
   texture.magFilter = LinearFilter
 
   return {
@@ -137,7 +138,11 @@ export interface ArchiveSpineAtlasRect {
   y: number
 }
 
-export const createSpineAtlas = (articleCount: number) => {
+export const createSpineAtlas = (
+  articleCount: number,
+  lowPower: boolean,
+  maxTextureSize: number,
+) => {
   const columns = Math.max(
     1,
     Math.min(
@@ -150,22 +155,27 @@ export const createSpineAtlas = (articleCount: number) => {
   const rows = Math.max(1, Math.ceil(articleCount / columns))
   const logicalWidth = columns * spineAtlasCellWidth
   const logicalHeight = rows * spineAtlasCellHeight
+  // Bound the shared atlas independently of article count and GPU limits.
+  const scale = Math.min(
+    lowPower ? 1.75 : 2.25,
+    maxTextureSize / Math.max(logicalWidth, logicalHeight),
+    Math.sqrt((lowPower ? 3_000_000 : 6_000_000) / (logicalWidth * logicalHeight)),
+  )
   const canvas = document.createElement('canvas')
-  canvas.width = logicalWidth * spineAtlasTextureScale
-  canvas.height = logicalHeight * spineAtlasTextureScale
+  canvas.width = Math.floor(logicalWidth * scale)
+  canvas.height = Math.floor(logicalHeight * scale)
   const context = canvas.getContext('2d', { alpha: false })
   if (!context) {
     throw new Error('Canvas 2D is unavailable')
   }
-  context.scale(spineAtlasTextureScale, spineAtlasTextureScale)
+  context.scale(canvas.width / logicalWidth, canvas.height / logicalHeight)
 
   const texture = new CanvasTexture(canvas)
   texture.colorSpace = SRGBColorSpace
-  texture.generateMipmaps = false
-  texture.minFilter = LinearFilter
+  texture.minFilter = LinearMipmapLinearFilter
   texture.magFilter = LinearFilter
 
-  const gutter = 2
+  const gutter = 4
   const rects: ArchiveSpineAtlasRect[] = Array.from(
     { length: articleCount },
     (_, index) => {
@@ -224,6 +234,7 @@ export const paintSpineAtlas = (
   atlas: ArchiveSpineAtlas,
   articles: ArchiveSceneArticle[],
   titleFontFamily: string,
+  styles: ArchiveBookStyle[],
 ) => {
   if (atlas.paintKey === titleFontFamily) {
     return
@@ -233,7 +244,6 @@ export const paintSpineAtlas = (
   const { context } = atlas
   context.fillStyle = '#ffffff'
   context.fillRect(0, 0, atlas.logicalWidth, atlas.logicalHeight)
-  context.fillStyle = '#20252a'
   context.textAlign = 'center'
   context.textBaseline = 'middle'
   context.letterSpacing = '0px'
@@ -244,6 +254,9 @@ export const paintSpineAtlas = (
     if (!rect) {
       continue
     }
+    const style = styles[index]
+    paintArchivePaper(context, style, rect.x, rect.y, spineAtlasCellWidth, spineAtlasCellHeight)
+    context.fillStyle = style.ink
     const normalizedTitle = articles[index].title.trim().replace(/\s+/g, ' ')
     context.font = `600 ${spineTitleMaxFontSize}px ${titleFontFamily}`
     const naturalWidth = context.measureText(normalizedTitle).width
@@ -344,6 +357,7 @@ export const paintArchiveLabel = (
   titleFontFamily: string,
   initialTitleFontSize: number,
   titleAlignment: 'left' | 'center',
+  style: ArchiveBookStyle,
 ) => {
   const paintKey = `${index}:${initialTitleFontSize.toFixed(2)}:${titleAlignment}:${titleFontFamily}`
   if (label.paintKey === paintKey) {
@@ -353,21 +367,31 @@ export const paintArchiveLabel = (
   label.articleIndex = index
 
   const { context } = label
-  context.fillStyle = '#ffffff'
-  context.fillRect(0, 0, label.logicalWidth, label.logicalHeight)
+  paintArchivePaper(context, style, 0, 0, label.logicalWidth, label.logicalHeight)
+  context.strokeStyle = style.rule
+  context.lineWidth = 0.7
+  if (style.variant === 0) {
+    context.strokeRect(18, 18, label.logicalWidth - 36, label.logicalHeight - 36)
+  } else {
+    context.beginPath()
+    if (style.variant === 1) {
+      context.moveTo(36, 83)
+      context.lineTo(348, 83)
+      context.moveTo(36, 490)
+      context.lineTo(348, 490)
+    } else {
+      context.moveTo(20, 24)
+      context.lineTo(20, 552)
+      context.moveTo(36, 83)
+      context.lineTo(83, 83)
+    }
+    context.stroke()
+  }
 
-  context.strokeStyle = '#dadee3'
-  context.lineWidth = 2
-  context.strokeRect(
-    18,
-    18,
-    label.logicalWidth - 36,
-    label.logicalHeight - 36,
-  )
-
-  context.fillStyle = '#5e646b'
+  context.fillStyle = style.muted
   context.font = '600 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
   context.textBaseline = 'top'
+  context.textAlign = 'left'
   context.letterSpacing = '2px'
   context.fillText(archiveLabel.toLocaleUpperCase(locale), 36, 39)
   context.textAlign = 'right'
@@ -402,7 +426,7 @@ export const paintArchiveLabel = (
     width: titleWidth,
     height: blockHeight,
   }
-  context.fillStyle = '#0e1217'
+  context.fillStyle = style.ink
   context.textAlign = titleAlignment
   context.textBaseline = 'middle'
   for (const line of lines) {
@@ -410,7 +434,7 @@ export const paintArchiveLabel = (
     y += lineHeight
   }
 
-  context.fillStyle = '#5e646b'
+  context.fillStyle = style.muted
   context.font = '500 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
   context.textAlign = 'left'
   context.textBaseline = 'bottom'
@@ -439,8 +463,7 @@ export const createYearLabelTexture = (
 
   const texture = new CanvasTexture(canvas)
   texture.colorSpace = SRGBColorSpace
-  texture.generateMipmaps = false
-  texture.minFilter = LinearFilter
+  texture.minFilter = LinearMipmapLinearFilter
   texture.magFilter = LinearFilter
   texture.needsUpdate = true
   return texture

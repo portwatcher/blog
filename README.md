@@ -45,6 +45,13 @@ keep moving to put it back and pass to the next one. Release within the selectio
 zone to hold that book, or stop between books with nothing selected. New input can
 interrupt settling immediately.
 
+Extraction unfolds over a longer gesture, with immediate input response. Books
+share a rounded hardback model with recessed page edges, subtle paper stocks and
+stable differences in thickness and cover rules. Text uses higher-resolution
+canvas textures, trilinear mipmaps and anisotropic filtering alongside hardware
+MSAA. Texture and screen-pixel budgets stay bounded on lower-power devices; the
+shelf remains instanced and only two cover labels are kept in memory.
+
 Click a spine to select it, then click the presented book to open the article.
 Arrow keys / A D select articles, Up / Down / W S change year shelves, and Escape
 puts the book back. Reduced motion, forced colors, save-data and unavailable WebGL

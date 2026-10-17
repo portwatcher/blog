@@ -32,8 +32,8 @@ export const resizeArchiveSceneViewport = (
   // from it than desktop-sized viewports. Truly constrained devices retain a
   // smaller cap, while the pixel budget prevents tablets from scaling this
   // cost without bound.
-  const maxRatio = lowPower ? 1.25 : 1.75
-  const pixelBudgetRatio = Math.sqrt(1_500_000 / (width * height))
+  const maxRatio = lowPower ? 1.25 : 2
+  const pixelBudgetRatio = Math.sqrt((lowPower ? 1_500_000 : 2_500_000) / (width * height))
   const ratio = Math.min(
     window.devicePixelRatio || 1,
     maxRatio,

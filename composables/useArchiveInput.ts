@@ -27,7 +27,8 @@ export const useArchiveInput = (options: ArchiveInputOptions) => {
 
   const pixelsPerArticle = () => {
     const width = options.stage.value?.clientWidth || window.innerWidth
-    return Math.min(380, Math.max(120, width * 0.28))
+    // A longer gesture gives extraction room to unfold, without adding lag.
+    return Math.min(570, Math.max(180, width * 0.42))
   }
 
   const cancel = () => {

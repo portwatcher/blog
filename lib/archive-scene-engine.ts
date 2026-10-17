@@ -1,6 +1,6 @@
 import {
   AmbientLight,
-  BoxGeometry,
+  BufferGeometry,
   Color,
   DirectionalLight,
   DynamicDrawUsage,
@@ -28,7 +28,6 @@ import {
 import type { ArchiveLabel } from './archive-scene-assets'
 import {
   caseDepth,
-  caseHeight,
   caseWidth,
   clamp,
   labelHeight,
@@ -42,6 +41,7 @@ import {
   yearLabelX,
   yearLabelYOffset,
 } from './archive-scene-constants'
+import { createArchiveBookModel, createArchiveBookStyles } from './archive-scene-books'
 import { createArchiveSceneInteraction } from './archive-scene-interaction'
 import { createArchiveSceneLayout } from './archive-scene-layout'
 import { createArchiveSceneMotion } from './archive-scene-motion'
@@ -105,14 +105,8 @@ export const createArchiveScene = (
   // Keep every case resident in one instanced draw call. The article count is
   // small enough that recycling a short pool costs more visually (instances
   // pop at either edge) than it saves on even a low-end mobile GPU.
-  const geometry = new BoxGeometry(caseWidth, caseHeight, caseDepth, 1, 1, 1)
-  const material = new MeshStandardMaterial({
-    // White stock stays white; the Standard material and directional light
-    // describe its faces through response to light instead of a grey base tint.
-    color: 0xffffff,
-    roughness: 0.72,
-    metalness: 0,
-  })
+  const { geometry, material, texture: stockTexture } = createArchiveBookModel()
+  const bookStyles = createArchiveBookStyles(articles, options.theme)
   const cases = new InstancedMesh(geometry, material, articles.length)
   cases.instanceMatrix.setUsage(DynamicDrawUsage)
   cases.frustumCulled = false
@@ -122,7 +116,7 @@ export const createArchiveScene = (
   // incoming cases become dedicated meshes while they leave their slots; this
   // keeps depth ordering physical without rebuilding the whole shelf per frame.
   const activeCases = [0, 1].map(() => {
-    const mesh = new Mesh(geometry, material)
+    const mesh = new Mesh(geometry, material.clone())
     mesh.matrixAutoUpdate = false
     mesh.visible = false
     mesh.frustumCulled = false
@@ -131,7 +125,7 @@ export const createArchiveScene = (
   })
 
   const labelGeometry = new PlaneGeometry(labelWidth, labelHeight)
-  const labels = [createArchiveLabel(), createArchiveLabel()]
+  const labels = [0, 1].map(() => createArchiveLabel(lowPower, renderer.capabilities.maxTextureSize))
   const labelMeshes = labels.map((label) => {
     const labelMaterial = new MeshStandardMaterial({
       map: label.texture,
@@ -150,12 +144,12 @@ export const createArchiveScene = (
   // One atlas keeps every title resident while still uploading only a single
   // texture. The shelf labels are batched below, so article count does not
   // become article-count draw calls.
-  const spineAtlas = createSpineAtlas(articles.length)
-  paintSpineAtlas(spineAtlas, articles, titleFontFamily)
+  const spineAtlas = createSpineAtlas(articles.length, lowPower, renderer.capabilities.maxTextureSize)
+  paintSpineAtlas(spineAtlas, articles, titleFontFamily, bookStyles)
   const textureAnisotropy = Math.max(
     1,
     Math.min(
-      lowPower ? 2 : 4,
+      lowPower ? 4 : 8,
       renderer.capabilities.getMaxAnisotropy(),
     ),
   )
@@ -163,6 +157,7 @@ export const createArchiveScene = (
     label.texture.anisotropy = textureAnisotropy
   })
   spineAtlas.texture.anisotropy = textureAnisotropy
+  stockTexture.anisotropy = textureAnisotropy
   const spineLabelMaterial = new MeshStandardMaterial({
     map: spineAtlas.texture,
     color: 0xffffff,
@@ -261,8 +256,12 @@ export const createArchiveScene = (
 
   restMatrices.forEach((matrix, articleIndex) => {
     cases.setMatrixAt(articleIndex, matrix)
+    cases.setColorAt(articleIndex, bookStyles[articleIndex].color)
   })
   cases.instanceMatrix.needsUpdate = true
+  if (cases.instanceColor) {
+    cases.instanceColor.needsUpdate = true
+  }
 
   const setLabelMatrix = (
     mesh: Mesh,
@@ -292,6 +291,7 @@ export const createArchiveScene = (
       titleFontFamily,
       cardTitleFontSize,
       cardTitleAlignment,
+      bookStyles[articleIndex],
     )
     mesh.matrix.copy(pose.matrix).multiply(labelOffset)
     mesh.visible = true
@@ -422,7 +422,7 @@ export const createArchiveScene = (
   }
 
   const setActiveCase = (
-    mesh: Mesh,
+    mesh: Mesh<BufferGeometry, MeshStandardMaterial>,
     articleIndex: number,
     frame: ArchiveSceneFrame,
   ) => {
@@ -434,6 +434,7 @@ export const createArchiveScene = (
 
     const pose = motion.getPose(articleIndex, frame)
     mesh.matrix.copy(pose.matrix)
+    mesh.material.color.copy(bookStyles[articleIndex].color)
     mesh.userData.articleIndex = articleIndex
     mesh.visible = true
   }
@@ -553,7 +554,7 @@ export const createArchiveScene = (
         label.paintKey = ''
       })
       spineAtlas.paintKey = ''
-      paintSpineAtlas(spineAtlas, articles, titleFontFamily)
+      paintSpineAtlas(spineAtlas, articles, titleFontFamily, bookStyles)
     },
     resize() {
       width = 0
@@ -563,6 +564,8 @@ export const createArchiveScene = (
     destroy() {
       geometry.dispose()
       material.dispose()
+      stockTexture.dispose()
+      activeCases.forEach((mesh) => mesh.material.dispose())
       labelGeometry.dispose()
       shelfSpineGeometry.dispose()
       yearLabelGeometry.dispose()

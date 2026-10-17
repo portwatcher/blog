@@ -39,6 +39,15 @@ export interface ArchiveSceneOptions {
   archiveLabel: string
   titleFontFamily?: string
   backgroundColor?: number
+  theme?: ArchiveSceneTheme
+}
+
+export interface ArchiveSceneTheme {
+  surface: number
+  subtle: number
+  heading: number
+  muted: number
+  border: number
 }
 
 export interface ArchiveCasePose {

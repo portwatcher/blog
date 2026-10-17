@@ -1,4 +1,5 @@
 import { Object3D } from 'three'
+import { archiveBookSeed } from './archive-scene-books'
 import {
   caseDepth,
   caseHeight,
@@ -49,11 +50,14 @@ export const createArchiveSceneLayout = (
 
   // Stable per-article variation reads as physical manufacturing/casual shelf
   // placement while preserving batching and avoiding layout shifts on return.
-  const caseScales = articles.map((_, articleIndex) => ({
-    x: 1 + indexVariance(articleIndex + 37) * 0.018,
-    y: 1 + indexVariance(articleIndex + 73) * 0.014,
-    z: 1 + indexVariance(articleIndex + 109) * 0.045,
-  }))
+  const caseScales = articles.map((article) => {
+    const seed = archiveBookSeed(article)
+    return {
+      x: 1 + indexVariance(seed + 37) * 0.025,
+      y: 1 + indexVariance(seed + 73) * 0.04,
+      z: 1 + indexVariance(seed + 109) * 0.18,
+    }
+  })
   const caseYawAngles = articles.map(
     (_, articleIndex) => indexVariance(articleIndex) * 0.018,
   )
