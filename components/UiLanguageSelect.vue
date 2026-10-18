@@ -2,7 +2,7 @@
   <label class="ui-language">
     <Languages class="ui-language__icon" aria-hidden="true" />
     <span class="ui-language__label">{{ $t('uiLanguage') }}</span>
-    <select :value="locale" @change="changeLocale">
+    <select v-model="selectedLocale">
       <option
         v-for="language in uiLocales"
         :key="language.code"
@@ -22,12 +22,14 @@ import { isUiLocale, uiLocales } from '~/utils/ui-locale'
 
 const { locale, setLocale } = useI18n()
 
-const changeLocale = (event: Event) => {
-  const target = event.target
-  if (target instanceof HTMLSelectElement && isUiLocale(target.value)) {
-    void setLocale(target.value)
-  }
-}
+const selectedLocale = computed({
+  get: () => locale.value,
+  set: (value: string) => {
+    if (isUiLocale(value)) {
+      void setLocale(value)
+    }
+  },
+})
 </script>
 
 <style scoped>
