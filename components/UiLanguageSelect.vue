@@ -1,6 +1,5 @@
 <template>
   <label class="ui-language">
-    <Languages class="ui-language__icon" aria-hidden="true" />
     <span class="ui-language__label">{{ $t('uiLanguage') }}</span>
     <select v-model="selectedLocale">
       <option
@@ -17,7 +16,7 @@
 </template>
 
 <script setup lang="ts">
-import { ChevronDown, Languages } from 'lucide-vue-next'
+import { ChevronDown } from 'lucide-vue-next'
 import { isUiLocale, uiLocales } from '~/utils/ui-locale'
 
 const { locale, setLocale } = useI18n()
@@ -38,23 +37,17 @@ const selectedLocale = computed({
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
+  font-size: 0.75rem;
+  color: var(--color-muted);
 }
 
 .ui-language svg {
   position: absolute;
-  width: 0.875rem;
-  height: 0.875rem;
+  right: 0.25rem;
+  width: 0.625rem;
+  height: 0.625rem;
+  stroke-width: 1.5;
   pointer-events: none;
-}
-
-.ui-language__icon {
-  left: 0.375rem;
-}
-
-.ui-language .ui-language__chevron {
-  right: 0.375rem;
-  width: 0.75rem;
-  height: 0.75rem;
 }
 
 .ui-language__label {
@@ -70,17 +63,17 @@ select {
   appearance: none;
   min-height: 2.75rem;
   max-width: 100%;
-  padding: 0.5rem 1.5rem;
+  padding: 0.5rem 1.25rem 0.5rem 0.375rem;
   border: 1px solid transparent;
   border-radius: 0.3rem;
   font: inherit;
   color: inherit;
-  background-color: var(--color-surface);
+  background-color: transparent;
   cursor: pointer;
 }
 
 select:hover {
-  border-color: var(--color-border);
+  color: var(--color-text);
 }
 
 select:focus-visible {
