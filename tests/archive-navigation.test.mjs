@@ -28,13 +28,13 @@ test('initial and between-book rests keep every book unselected', () => {
   }
 })
 
-test('pointer and wheel travel speeds up in gaps and slows through the approach and selection', () => {
+test('pointer and wheel travel stays equally slow near selection and at its center, with fast gaps', () => {
   // Observable book-distance budgets for a one-pixel gesture on a phone.
   const zones = [
     { position: 2.5, minimum: 0.0105, maximum: 0.013 },
-    { position: 2.18, minimum: 0.0035, maximum: 0.0053 },
-    { position: 2.09, minimum: 0.0018, maximum: 0.003 },
-    { position: 2, minimum: 0.001, maximum: 0.0017 },
+    { position: 2.14, minimum: 0.0013, maximum: 0.0016 },
+    { position: 2.09, minimum: 0.0013, maximum: 0.0016 },
+    { position: 2, minimum: 0.0013, maximum: 0.0016 },
   ]
   for (const direction of [-1, 1]) {
     const navigation = createArchiveNavigation(0, 5)

@@ -3,6 +3,7 @@ import test from 'node:test'
 import { DirectionalLight, PerspectiveCamera, Vector3 } from 'three'
 import { createArchiveSceneLayout } from '../lib/archive-scene-layout.ts'
 import { createArchiveSceneMotion } from '../lib/archive-scene-motion.ts'
+import { archiveTravelForInput, createArchiveNavigation } from '../lib/archive-navigation.ts'
 
 const createScene = (aspect) => {
   const articles = Array.from({ length: 9 }, (_, index) => ({
@@ -25,8 +26,46 @@ const createScene = (aspect) => {
     return moving
   }
   update()
-  return { camera, layout, frame, update }
+  return { camera, layout, frame, motion, update }
 }
+
+test('a phone gesture unfolds the book gradually and reverses the actual pose without lag', () => {
+  const { frame, motion } = createScene(393 / 690)
+  const navigation = createArchiveNavigation(0, 5)
+  const step = archiveTravelForInput(1, 393)
+  const poseAt = (position) => {
+    frame.position = position
+    return motion.getPose(0, frame).matrix.clone()
+  }
+  const restingZ = poseAt(-0.5).elements[14]
+  const presentedZ = poseAt(0).elements[14]
+  const poses = []
+  const extraction = []
+  while (navigation.position < 0 && poses.length < 500) {
+    const pose = poseAt(navigation.position)
+    poses.push(pose)
+    extraction.push((pose.elements[14] - restingZ) / (presentedZ - restingZ))
+    navigation.moveBy(step)
+  }
+  assert.equal(navigation.selectedIndex, 0)
+  const firstTenPercent = extraction.findIndex((progress) => progress >= 0.1)
+  const firstNinetyPercent = extraction.findIndex((progress) => progress >= 0.9)
+  assert.ok(firstNinetyPercent - firstTenPercent >= 60,
+    'the main extraction must span at least 60px of a phone gesture')
+  for (let index = 1; index < extraction.length; index++) {
+    const delta = extraction[index] - extraction[index - 1]
+    assert.ok(delta >= -1e-10 && delta < 0.02,
+      'a one-pixel gesture must not suddenly thrust the book out')
+  }
+  for (const expected of poses.reverse()) {
+    navigation.moveBy(-step)
+    const actual = poseAt(navigation.position)
+    expected.elements.forEach((value, index) => {
+      assert.ok(Math.abs(actual.elements[index] - value) < 1e-9,
+        'reversing input must immediately retrace translation and rotation')
+    })
+  }
+})
 
 test('horizontal browsing keeps the shelf at a fixed screen height through extraction and reversal', () => {
   for (const [width, height, hz] of [[393, 690, 60], [1280, 720, 120]]) {
