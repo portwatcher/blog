@@ -5,22 +5,48 @@
 </template>
 
 <script setup lang="ts">
-const supportedLocales = ['en', 'zh', 'ja'] as const
-type SupportedLocale = typeof supportedLocales[number]
-const isSupportedLocale = (value: string): value is SupportedLocale =>
-  supportedLocales.includes(value as SupportedLocale)
+import { isUiLocale, uiLocaleStorageKey } from '~/utils/ui-locale'
+
 const { locale: currentLocale, setLocale } = useI18n()
 
-const detectedLocale = import.meta.client
-  ? navigator.language.slice(0, 2).toLowerCase()
-  : useRequestHeaders(['accept-language'])
-    ?.['accept-language']?.slice(0, 2)
-    .toLowerCase() || 'en'
-const locale = isSupportedLocale(detectedLocale) ? detectedLocale : 'en'
+// Serialize the initial language so server rendering and hydration agree.
+const initialLocale = useState('ui-locale', () => {
+  const detectedLocale = import.meta.server
+    ? useRequestHeaders(['accept-language'])['accept-language']?.slice(0, 2).toLowerCase()
+    : navigator.language.slice(0, 2).toLowerCase()
 
-if (currentLocale.value !== locale) {
-  await setLocale(locale)
+  return isUiLocale(detectedLocale) ? detectedLocale : 'en'
+})
+
+if (currentLocale.value !== initialLocale.value) {
+  await setLocale(initialLocale.value)
 }
+
+onMounted(async () => {
+  // Restore only after hydration; storage may be unavailable in private mode.
+  let savedLocale: string | null = null
+  try {
+    savedLocale = localStorage.getItem(uiLocaleStorageKey)
+  } catch {
+    // Keep the browser language when storage is blocked.
+  }
+
+  if (isUiLocale(savedLocale) && currentLocale.value !== savedLocale) {
+    await setLocale(savedLocale)
+  }
+})
+
+watch(currentLocale, (locale) => {
+  if (import.meta.client) {
+    try {
+      localStorage.setItem(uiLocaleStorageKey, locale)
+    } catch {
+      // Language selection still works for this visit without storage.
+    }
+  }
+})
+
+useHead(() => ({ htmlAttrs: { lang: currentLocale.value } }))
 </script>
 
 <style>

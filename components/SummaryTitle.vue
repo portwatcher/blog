@@ -3,7 +3,7 @@
     <NuxtLink :to="`/articles/${getArticleRouteTitle(article)}`">
       {{ article.title }}
     </NuxtLink>
-    <span>{{ new Date(article.date).toLocaleDateString() }}</span>
+    <span>{{ $d(new Date(article.date), 'short') }}</span>
   </div>
 </template>
 
@@ -19,9 +19,12 @@ defineProps<{
   width: 100%;
   font-size: 16px;
   align-items: flex-start;
+  gap: 1rem;
 }
 
 a {
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: #333;
 }
 
@@ -33,5 +36,6 @@ span {
   margin-left: auto;
   text-align: right;
   min-width: 6rem;
+  flex-shrink: 0;
 }
 </style>

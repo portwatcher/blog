@@ -8,7 +8,9 @@ Personal blog implementing the Classify theme of [Farbox](https://github.com/hep
 
 - RSS feed at `/feed`
 - Markdown and MathJax
-- i18n article UI and generated article translations
+- Responsive menu with an interface language dropdown (English, 中文, 日本語)
+- Interface language saved in localStorage (`blog-ui-locale`), including article list translations and dates
+- Generated article translations with an independent per-article language selector (`?lang=`)
 - Archive pages grouped by year
 - giscus comments
 - neodb.social collections

@@ -35,9 +35,8 @@ useSeoMeta({
 
 h1 {
   font-size: 2em;
-  margin: 0.67em;
-  width: 100%;
+  margin: 0.67em 0 4rem;
+  overflow-wrap: anywhere;
   text-align: center;
-  margin-bottom: 4rem;
 }
 </style>

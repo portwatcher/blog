@@ -37,6 +37,7 @@
     <div v-if="articles.length" class="archive__track">
       <ArchiveScene
         v-if="archiveView === '3d'"
+        :key="articles[0]?.requestedLang ?? ''"
         :articles="articles"
         :initial-index="initialIndex"
         :returning="returning"

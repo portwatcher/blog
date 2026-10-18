@@ -6,15 +6,18 @@
     <a class="skip-link" href="#main-content">{{ $t('skipToContent') }}</a>
 
     <header class="site-header">
-      <NuxtLink to="/">{{ $t('home') }}</NuxtLink>
-      <NuxtLink to="/archive">{{ $t('archive') }}</NuxtLink>
-      <NuxtLink
-        to="/feed"
-        external
-      >{{ $t('feed') }}</NuxtLink>
-      <NuxtLink to="/shelf">
-        {{ $t('shelf') }}
-      </NuxtLink>
+      <nav class="site-menu" :aria-label="$t('navigation')">
+        <NuxtLink to="/">{{ $t('home') }}</NuxtLink>
+        <NuxtLink to="/archive">{{ $t('archive') }}</NuxtLink>
+        <NuxtLink
+          to="/feed"
+          external
+        >{{ $t('feed') }}</NuxtLink>
+        <NuxtLink to="/shelf">
+          {{ $t('shelf') }}
+        </NuxtLink>
+      </nav>
+      <UiLanguageSelect />
     </header>
 
     <main
@@ -59,6 +62,12 @@ const isArchive = computed(() => route.path === '/archive')
   display: inline-flex;
   min-height: 2.75rem;
   align-items: center;
+}
+
+.site-menu {
+  display: flex;
+  align-items: center;
+  gap: clamp(0.75rem, 3vw, 1.5rem);
 }
 
 .site-header a:hover,
@@ -116,11 +125,22 @@ const isArchive = computed(() => route.path === '/archive')
 }
 
 @media (max-width: 30rem) {
+  .site-shell {
+    --site-header-height: 91px;
+  }
+
   .site-header {
     justify-content: space-between;
     gap: 0.5rem;
     padding-right: max(0.75rem, env(safe-area-inset-right));
     padding-left: max(0.75rem, env(safe-area-inset-left));
+  }
+
+  .site-menu {
+    display: grid;
+    grid-template-columns: repeat(2, max-content);
+    column-gap: clamp(1rem, 5vw, 2rem);
+    row-gap: 0;
   }
 }
 </style>

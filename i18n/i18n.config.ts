@@ -41,6 +41,9 @@ export default defineI18nConfig(() => ({
   },
   messages: {
     en: {
+      navigation: 'Main navigation',
+      uiLanguage: 'Interface language',
+      postCount: '{count} posts | {count} post | {count} posts',
       home: 'Home',
       archive: 'Archive',
       feed: 'Feed',
@@ -77,6 +80,9 @@ export default defineI18nConfig(() => ({
       },
     },
     zh: {
+      navigation: '主导航',
+      uiLanguage: '界面语言',
+      postCount: '{count} 篇文章',
       home: '首页',
       archive: '归档',
       feed: '订阅',
@@ -113,6 +119,9 @@ export default defineI18nConfig(() => ({
       },
     },
     ja: {
+      navigation: 'メインナビゲーション',
+      uiLanguage: '表示言語',
+      postCount: '{count}件の記事',
       home: 'トップ',
       archive: 'アーカイブ',
       feed: 'フィード',
