@@ -20,7 +20,6 @@ defineProps<{
 
 <style scoped>
 h2 {
-  overflow-wrap: anywhere;
   font-size: 2.2rem;
   font-family: 'Noto Serif SC', 'Noto Serif JP', 'PT Serif', "Georgia", "Times New Roman", Times, "Songti SC", "SimSun", sans-serif;
 }
@@ -30,7 +29,6 @@ h2 a:hover {
 }
 
 .summary>a {
-  overflow-wrap: anywhere;
   padding: 1rem;
   line-height: 2.1;
   display: block;

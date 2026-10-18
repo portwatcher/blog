@@ -74,9 +74,9 @@ useHead(() => ({
 
 <style scoped>
 .categories {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
-  gap: clamp(1rem, 4vw, 3rem);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
   padding: 2rem 0;
 }
 
@@ -89,10 +89,10 @@ useHead(() => ({
   font-family: 'FreeSans', 'Arimo', "Droid Sans", Helvetica, Arial, sans-serif;
   font-size: 16px;
   position: relative;
-  min-width: 0;
-  min-height: 16em;
-  padding: 3.75rem 1.875rem;
-  box-sizing: border-box;
+  margin: 20px 40px;
+  height: 16em;
+  width: 12em;
+  padding: 60px 30px;
 
   &:hover {
     box-shadow: 0 1px 5px rgba(0, 0, 0, 0.2);
@@ -108,7 +108,6 @@ useHead(() => ({
   gap: 1rem;
 
   h3 {
-    overflow-wrap: anywhere;
     color: #333;
     font-size: 1.2rem;
     font-weight: normal;
