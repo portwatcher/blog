@@ -9,6 +9,7 @@ import {
   caseWidth,
   clamp,
 } from './archive-scene-constants'
+import { archiveRenderPixelRatio } from './archive-render-quality'
 
 interface ResizeArchiveSceneViewportOptions {
   camera: PerspectiveCamera
@@ -28,17 +29,7 @@ export const resizeArchiveSceneViewport = (
     renderer,
     width,
   } = options
-  // Mid-tier phones can afford a modest supersample and benefit much more
-  // from it than desktop-sized viewports. Truly constrained devices retain a
-  // smaller cap, while the pixel budget prevents tablets from scaling this
-  // cost without bound.
-  const maxRatio = lowPower ? 1.25 : 2
-  const pixelBudgetRatio = Math.sqrt((lowPower ? 1_500_000 : 2_500_000) / (width * height))
-  const ratio = Math.min(
-    window.devicePixelRatio || 1,
-    maxRatio,
-    pixelBudgetRatio,
-  )
+  const ratio = archiveRenderPixelRatio(width, height, window.devicePixelRatio || 1, lowPower)
   renderer.setPixelRatio(ratio)
   renderer.setSize(width, height, false)
 

@@ -34,8 +34,6 @@ import {
   labelWidth,
   shelfY,
   shelfZ,
-  spineLabelHeight,
-  spineLabelWidth,
   yearLabelHeight,
   yearLabelWidth,
   yearLabelX,
@@ -45,6 +43,8 @@ import { createArchiveBookModel, createArchiveBookStyles } from './archive-scene
 import { createArchiveSceneInteraction } from './archive-scene-interaction'
 import { createArchiveSceneLayout } from './archive-scene-layout'
 import { createArchiveSceneMotion } from './archive-scene-motion'
+import { createArchiveActiveSpine } from './archive-scene-spines'
+import type { ArchiveActiveSpine } from './archive-scene-spines'
 import type {
   ArchiveSceneEngine,
   ArchiveSceneFrame,
@@ -74,7 +74,8 @@ export const createArchiveScene = (
     stencil: false,
     preserveDrawingBuffer: false,
     powerPreference: 'low-power',
-    precision: 'mediump',
+    // Half-precision UVs quantize high-resolution glyph textures on mobile GPUs.
+    precision: 'highp',
   })
   renderer.outputColorSpace = SRGBColorSpace
 
@@ -217,18 +218,14 @@ export const createArchiveScene = (
     return { material: yearMaterial, texture }
   })
 
-  // The two cases crossing the active selection boundary leave the static
-  // batch and receive tiny dynamic quads that share the same atlas/material.
-  const activeSpineGeometries = [0, 1].map(
-    () => new PlaneGeometry(spineLabelWidth, spineLabelHeight),
-  )
-  const activeSpineMeshes = activeSpineGeometries.map((spineGeometry) => {
-    const mesh = new Mesh(spineGeometry, spineLabelMaterial)
-    mesh.matrixAutoUpdate = false
-    mesh.visible = false
-    mesh.frustumCulled = false
-    scene.add(mesh)
-    return mesh
+  const activeSpines = [0, 1].map(() => {
+    const spine = createArchiveActiveSpine({
+      articles, styles: bookStyles, titleFontFamily, lowPower,
+      maxTextureSize: renderer.capabilities.maxTextureSize,
+      anisotropy: textureAnisotropy,
+    })
+    scene.add(spine.mesh)
+    return spine
   })
   const motion = createArchiveSceneMotion({
     camera,
@@ -297,35 +294,18 @@ export const createArchiveScene = (
     mesh.visible = true
   }
 
-  const setSpineGeometryArticle = (
-    spineGeometry: PlaneGeometry,
-    articleIndex: number,
-  ) => {
-    if (spineGeometry.userData.articleIndex === articleIndex) {
-      return
-    }
-    const rect = spineAtlas.rects[articleIndex]
-    const uv = spineGeometry.getAttribute('uv')
-    uv.setXY(0, rect.u0, rect.v1)
-    uv.setXY(1, rect.u1, rect.v1)
-    uv.setXY(2, rect.u0, rect.v0)
-    uv.setXY(3, rect.u1, rect.v0)
-    uv.needsUpdate = true
-    spineGeometry.userData.articleIndex = articleIndex
-  }
-
   const setActiveSpineLabel = (
-    mesh: Mesh,
-    spineGeometry: PlaneGeometry,
+    spine: ArchiveActiveSpine,
     articleIndex: number,
     frame: ArchiveSceneFrame,
   ) => {
+    const { mesh } = spine
     if (articleIndex < 0 || articleIndex >= articles.length) {
       mesh.visible = false
       return
     }
 
-    setSpineGeometryArticle(spineGeometry, articleIndex)
+    spine.setArticle(articleIndex)
     const pose = motion.getPose(articleIndex, frame)
     mesh.matrix.copy(pose.matrix).multiply(spineLabelOffset)
     mesh.visible = true
@@ -476,17 +456,15 @@ export const createArchiveScene = (
     frame: ArchiveSceneFrame,
   ) => {
     setActiveSpineLabel(
-      activeSpineMeshes[0],
-      activeSpineGeometries[0],
+      activeSpines[0],
       lower,
       frame,
     )
     if (upper === lower) {
-      activeSpineMeshes[1].visible = false
+      activeSpines[1].mesh.visible = false
     } else {
       setActiveSpineLabel(
-        activeSpineMeshes[1],
-        activeSpineGeometries[1],
+        activeSpines[1],
         upper,
         frame,
       )
@@ -555,6 +533,7 @@ export const createArchiveScene = (
       })
       spineAtlas.paintKey = ''
       paintSpineAtlas(spineAtlas, articles, titleFontFamily, bookStyles)
+      activeSpines.forEach((spine) => spine.refreshTypography())
     },
     resize() {
       width = 0
@@ -573,9 +552,7 @@ export const createArchiveScene = (
         yearMaterial.dispose()
         texture.dispose()
       })
-      activeSpineGeometries.forEach((spineGeometry) => {
-        spineGeometry.dispose()
-      })
+      activeSpines.forEach((spine) => spine.destroy())
       labels.forEach((label) => {
         label.texture.dispose()
       })

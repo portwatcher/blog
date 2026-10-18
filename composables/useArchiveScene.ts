@@ -403,7 +403,9 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
       const styles = getComputedStyle(stage.value)
       engine = createArchiveScene({
         canvas: canvas.value, context, host: stage.value, articles: props.articles,
-        lowPower: (nav.deviceMemory ?? 8) <= 2 || (navigator.hardwareConcurrency || 4) <= 4,
+        // Reported CPU concurrency is not a measure of GPU capability. In
+        // particular, an absent value must not force Retina text down to 1.25x.
+        lowPower: (nav.deviceMemory ?? 8) <= 2,
         locale: locale.value, archiveLabel: t('archive'),
         titleFontFamily: styles.getPropertyValue('--font-serif').trim() || 'sans-serif',
         backgroundColor: cssColorToNumber(styles.backgroundColor),

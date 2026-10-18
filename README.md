@@ -51,6 +51,11 @@ stable differences in thickness and cover rules. Text uses higher-resolution
 canvas textures, trilinear mipmaps and anisotropic filtering alongside hardware
 MSAA. Texture and screen-pixel budgets stay bounded on lower-power devices; the
 shelf remains instanced and only two cover labels are kept in memory.
+Retina phones retain their native pixel density within a four-million-pixel
+framebuffer budget (two million on devices reporting at most 2 GB of memory).
+CPU core counts do not lower text resolution. High-precision texture coordinates
+and two reusable close-up spine textures keep extracted titles sharp without
+enlarging the shared shelf atlas.
 
 Click a spine to select it, then click the presented book to open the article.
 Arrow keys / A D select articles, Up / Down / W S change year shelves, and Escape
@@ -61,6 +66,7 @@ Run the navigation behavior checks with Node.js 22.18+:
 
 ```bash
 node --test tests/archive-navigation.test.mjs
+node --test tests/archive-render-quality.test.mjs
 ```
 
 ## Content Repo

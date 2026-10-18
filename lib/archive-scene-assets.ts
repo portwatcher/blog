@@ -142,6 +142,7 @@ export const createSpineAtlas = (
   articleCount: number,
   lowPower: boolean,
   maxTextureSize: number,
+  requestedScale = lowPower ? 1.75 : 2.25,
 ) => {
   const columns = Math.max(
     1,
@@ -157,7 +158,7 @@ export const createSpineAtlas = (
   const logicalHeight = rows * spineAtlasCellHeight
   // Bound the shared atlas independently of article count and GPU limits.
   const scale = Math.min(
-    lowPower ? 1.75 : 2.25,
+    requestedScale,
     maxTextureSize / Math.max(logicalWidth, logicalHeight),
     Math.sqrt((lowPower ? 3_000_000 : 6_000_000) / (logicalWidth * logicalHeight)),
   )
