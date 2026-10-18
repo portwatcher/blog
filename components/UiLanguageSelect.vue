@@ -1,5 +1,6 @@
 <template>
   <label class="ui-language">
+    <Languages class="ui-language__icon" aria-hidden="true" />
     <span class="ui-language__label">{{ $t('uiLanguage') }}</span>
     <select v-model="selectedLocale">
       <option
@@ -16,7 +17,7 @@
 </template>
 
 <script setup lang="ts">
-import { ChevronDown } from 'lucide-vue-next'
+import { ChevronDown, Languages } from 'lucide-vue-next'
 import { isUiLocale, uiLocales } from '~/utils/ui-locale'
 
 const { locale, setLocale } = useI18n()
@@ -43,11 +44,20 @@ const selectedLocale = computed({
 
 .ui-language svg {
   position: absolute;
-  right: 0.25rem;
   width: 0.625rem;
   height: 0.625rem;
   stroke-width: 1.5;
   pointer-events: none;
+}
+
+.ui-language .ui-language__icon {
+  left: 0.25rem;
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.ui-language__chevron {
+  right: 0.25rem;
 }
 
 .ui-language__label {
@@ -63,7 +73,7 @@ select {
   appearance: none;
   min-height: 2.75rem;
   max-width: 100%;
-  padding: 0.5rem 1.25rem 0.5rem 0.375rem;
+  padding: 0.5rem 1.25rem;
   border: 1px solid transparent;
   border-radius: 0.3rem;
   font: inherit;
