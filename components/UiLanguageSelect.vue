@@ -42,17 +42,19 @@ const selectedLocale = computed({
 
 .ui-language svg {
   position: absolute;
-  width: 1rem;
-  height: 1rem;
+  width: 0.875rem;
+  height: 0.875rem;
   pointer-events: none;
 }
 
 .ui-language__icon {
-  left: 0.5rem;
+  left: 0.375rem;
 }
 
-.ui-language__chevron {
-  right: 0.5rem;
+.ui-language .ui-language__chevron {
+  right: 0.375rem;
+  width: 0.75rem;
+  height: 0.75rem;
 }
 
 .ui-language__label {
@@ -68,11 +70,10 @@ select {
   appearance: none;
   min-height: 2.75rem;
   max-width: 100%;
-  padding: 0.5rem 1.75rem;
+  padding: 0.5rem 1.5rem;
   border: 1px solid transparent;
   border-radius: 0.3rem;
   font: inherit;
-  font-size: 1rem;
   color: inherit;
   background-color: var(--color-surface);
   cursor: pointer;
