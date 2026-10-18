@@ -41,7 +41,8 @@ The app can run against local Markdown under `content/`, but production-style us
 
 ## Archive 3D Interaction
 
-The archive's 3D view starts with no book selected. Drag horizontally or vertically,
+The archive opens in 3D by default, with no book selected. The view switch or
+`/archive?view=list` opens the list. Drag horizontally or vertically,
 use a touch swipe, or scroll to browse continuously. Movement slows near each book;
 keep moving to put it back and pass to the next one. Release within the selection
 zone to hold that book, or stop between books with nothing selected. New input can
@@ -56,6 +57,9 @@ to charcoal, with matching spine numbers, pressed hinges, paper title labels and
 restrained cover frames. A shared cloth relief texture catches the light, while
 paper grain and stable differences in thickness make
 the books distinct while retaining the site's typography and quiet palette.
+Each cover's top line shows its category title from `categories/` (falling back to
+the article's category when no category document exists). Long category titles
+are shortened to keep the volume number clear.
 Text uses higher-resolution
 canvas textures, trilinear mipmaps and anisotropic filtering alongside hardware
 MSAA. Texture and screen-pixel budgets stay bounded on lower-power devices; the

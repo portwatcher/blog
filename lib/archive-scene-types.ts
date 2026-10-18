@@ -3,6 +3,9 @@ import type { Matrix4 } from 'three'
 export interface ArchiveSceneArticle {
   title: string
   date: string
+  categoryTitle?: string
+  category?: string
+  _dir?: string
 }
 
 export interface ArchiveSceneFrame {
@@ -36,7 +39,6 @@ export interface ArchiveSceneOptions {
   articles: ArchiveSceneArticle[]
   lowPower: boolean
   locale: string
-  archiveLabel: string
   titleFontFamily?: string
   backgroundColor?: number
   theme?: ArchiveSceneTheme

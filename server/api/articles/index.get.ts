@@ -233,6 +233,7 @@ const getArticleWithTranslation = async (
     _path: article._path || article.path,
     _dir: article._dir || getArticleCategory(article),
     category: article.category || translation.category,
+    categoryTitle: article.categoryTitle || translation.categoryTitle,
     date: article.date || translation.date,
     status: article.status || translation.status,
     legacyPath: article.legacyPath,

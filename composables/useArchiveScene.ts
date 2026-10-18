@@ -406,7 +406,7 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
         // Reported CPU concurrency is not a measure of GPU capability. In
         // particular, an absent value must not force Retina text down to 1.25x.
         lowPower: (nav.deviceMemory ?? 8) <= 2,
-        locale: locale.value, archiveLabel: t('archive'),
+        locale: locale.value,
         titleFontFamily: styles.getPropertyValue('--font-serif').trim() || 'sans-serif',
         backgroundColor: cssColorToNumber(styles.backgroundColor),
         theme: {

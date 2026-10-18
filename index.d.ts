@@ -67,6 +67,7 @@ interface Article {
   title: string
   description?: string
   category?: string
+  categoryTitle?: string
   date: string
   status?: 'draft' | 'public' | 'private'
   lang?: string

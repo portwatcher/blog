@@ -440,23 +440,44 @@ const parseMarkdownDocument = async (
   }
 }
 
+const readCategoryTitles = async (files: FileRef[]) => {
+  const parser = await parserPromise
+  const entries = await Promise.all(files.map(async (file) => {
+    const raw = await readFile(file.absolutePath, 'utf8')
+    const { data } = await parser(raw)
+    const slug = String(data?.slug || basename(file.relativePath, '.md')).trim()
+    const title = String(data?.title || slug).trim()
+    return [slug, title] as const
+  }))
+  return new Map(entries)
+}
+
 const loadRuntimeContentFromRoot = async (root: string, config: RuntimeContentConfig): Promise<RuntimeContent> => {
   const files = await collectMarkdownFiles(root)
+  const categoryFiles = files.filter((file) =>
+    matchesPattern(file.relativePath, 'categories/**/*.md')
+  )
   const translationFiles = files.filter((file) =>
     matchesAnyPattern(file.relativePath, config.translationIncludes)
   )
   const articleFiles = files.filter((file) =>
     matchesAnyPattern(file.relativePath, config.articleIncludes) &&
-    !matchesAnyPattern(file.relativePath, config.translationIncludes)
+    !matchesAnyPattern(file.relativePath, config.translationIncludes) &&
+    !matchesPattern(file.relativePath, 'categories/**/*.md')
   )
-  const [articles, translations] = await Promise.all([
+  const [articles, translations, categoryTitles] = await Promise.all([
     Promise.all(articleFiles.map((file) => parseMarkdownDocument(file, root, 'articles', config))),
     Promise.all(translationFiles.map((file) => parseMarkdownDocument(file, root, 'translations', config))),
+    readCategoryTitles(categoryFiles),
   ])
+  const withCategoryTitle = (article: RuntimeArticleDocument) => ({
+    ...article,
+    categoryTitle: categoryTitles.get(String(article.category)) || String(article.category || ''),
+  })
 
   return {
-    articles: articles.sort(sortArticlesByDateDesc),
-    translations,
+    articles: articles.map(withCategoryTitle).sort(sortArticlesByDateDesc),
+    translations: translations.map(withCategoryTitle),
   }
 }
 

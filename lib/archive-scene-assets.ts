@@ -206,7 +206,7 @@ export const createSpineAtlas = (
 
 export type ArchiveSpineAtlas = ReturnType<typeof createSpineAtlas>
 
-const truncateSpineTitle = (
+const truncateLabelText = (
   context: CanvasRenderingContext2D,
   title: string,
   maxWidth: number,
@@ -297,7 +297,7 @@ export const paintSpineAtlas = (
       spineTitleMaxFontSize,
     )
     context.font = `600 ${fontSize}px ${titleFontFamily}`
-    const title = truncateSpineTitle(
+    const title = truncateLabelText(
       context,
       normalizedTitle,
       maxTitleWidth,
@@ -379,13 +379,14 @@ export const paintArchiveLabel = (
   index: number,
   count: number,
   locale: string,
-  archiveLabel: string,
   titleFontFamily: string,
   initialTitleFontSize: number,
   titleAlignment: 'left' | 'center',
   style: ArchiveBookStyle,
 ) => {
-  const paintKey = `${index}:${initialTitleFontSize.toFixed(2)}:${titleAlignment}:${titleFontFamily}`
+  const categoryTitle = article.categoryTitle?.trim()
+    || article.category?.trim() || article._dir?.trim() || 'Uncategorized'
+  const paintKey = `${index}:${categoryTitle}:${initialTitleFontSize.toFixed(2)}:${titleAlignment}:${titleFontFamily}`
   if (label.paintKey === paintKey) {
     return
   }
@@ -398,15 +399,16 @@ export const paintArchiveLabel = (
   context.fillStyle = style.muted
   context.font = '600 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
   context.textBaseline = 'top'
-  context.textAlign = 'left'
-  context.letterSpacing = '1.6px'
-  context.fillText(archiveLabel.toLocaleUpperCase(locale), 40, 48)
   context.textAlign = 'right'
   context.letterSpacing = '0.5px'
+  const volumeNumber = `${String(index + 1).padStart(2, '0')} / ${String(count).padStart(2, '0')}`
+  context.fillText(volumeNumber, 346, 48)
+  const categoryWidth = 346 - context.measureText(volumeNumber).width - 18 - 40
+  context.textAlign = 'left'
+  context.letterSpacing = '1.6px'
   context.fillText(
-    `${String(index + 1).padStart(2, '0')} / ${String(count).padStart(2, '0')}`,
-    346,
-    48,
+    truncateLabelText(context, categoryTitle.toLocaleUpperCase(locale), categoryWidth),
+    40, 48,
   )
 
   context.textAlign = 'left'

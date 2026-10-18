@@ -98,7 +98,7 @@ let returnOperation = 0
 
 const { data } = await useFetch<Article[]>('/api/articles', {
   query: computed(() => ({
-    only: ['title', 'date', '_dir', 'originalTitle'],
+    only: ['title', 'date', '_dir', 'categoryTitle', 'originalTitle'],
     lang: locale.value,
   })),
 })
@@ -107,7 +107,7 @@ const articles = computed(() => data.value || [])
 const sceneMode = ref<'pending' | 'webgl' | 'fallback'>('pending')
 const archiveView = useRouteQueryState<ArchiveView>({
   key: 'view',
-  defaultValue: 'list',
+  defaultValue: '3d',
   parse(value, defaultValue) {
     return value === 'list' || value === '3d' ? value : defaultValue
   },

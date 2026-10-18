@@ -62,7 +62,6 @@ export const createArchiveScene = (
     articles,
     lowPower,
     locale,
-    archiveLabel,
     titleFontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   } = options
   const renderer = new WebGLRenderer({
@@ -290,7 +289,6 @@ export const createArchiveScene = (
       articleIndex,
       articles.length,
       locale,
-      archiveLabel,
       titleFontFamily,
       cardTitleFontSize,
       cardTitleAlignment,
