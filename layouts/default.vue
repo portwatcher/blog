@@ -40,7 +40,7 @@ const isArchive = computed(() => route.path === '/archive')
 
 <style scoped>
 .site-shell {
-  --site-header-height: 47px;
+  --site-header-height: 2.9375rem;
 }
 
 .site-header {
@@ -126,7 +126,7 @@ const isArchive = computed(() => route.path === '/archive')
 
 @media (max-width: 30rem) {
   .site-shell {
-    --site-header-height: 91px;
+    --site-header-height: 5.6875rem;
   }
 
   .site-header {
