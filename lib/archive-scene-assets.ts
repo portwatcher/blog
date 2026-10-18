@@ -20,7 +20,7 @@ import {
   spineTitleMaxFontSize,
   spineTitleMinFontSize,
 } from './archive-scene-constants'
-import { paintArchivePaper } from './archive-scene-books'
+import { paintArchiveCover, paintArchivePaper } from './archive-scene-books'
 import type { ArchiveBookStyle } from './archive-scene-books'
 import type {
   ArchiveSceneArticle,
@@ -248,8 +248,6 @@ export const paintSpineAtlas = (
   context.textAlign = 'center'
   context.textBaseline = 'middle'
   context.letterSpacing = '0px'
-  const maxTitleWidth = spineAtlasCellHeight - 34
-
   for (let index = 0; index < articles.length; index++) {
     const rect = atlas.rects[index]
     if (!rect) {
@@ -257,7 +255,34 @@ export const paintSpineAtlas = (
     }
     const style = styles[index]
     paintArchivePaper(context, style, rect.x, rect.y, spineAtlasCellWidth, spineAtlasCellHeight)
-    context.fillStyle = style.ink
+    const paperLabel = style.variant === 1
+    const titleTop = paperLabel ? 45 : 38
+    const titleBottom = paperLabel ? 329 : 338
+    const maxTitleWidth = titleBottom - titleTop - 14
+    context.strokeStyle = style.rule
+    context.lineWidth = 0.8
+    if (paperLabel) {
+      context.fillStyle = style.label
+      context.fillRect(rect.x + 8, rect.y + 38, spineAtlasCellWidth - 16, 298)
+      context.strokeStyle = style.labelRule
+      context.strokeRect(rect.x + 10, rect.y + 40, spineAtlasCellWidth - 20, 294)
+    } else {
+      context.beginPath()
+      context.moveTo(rect.x + 12, rect.y + 31)
+      context.lineTo(rect.x + spineAtlasCellWidth - 12, rect.y + 31)
+      context.moveTo(rect.x + 12, rect.y + 345)
+      context.lineTo(rect.x + spineAtlasCellWidth - 12, rect.y + 345)
+      context.stroke()
+    }
+    context.fillStyle = style.muted
+    context.font = `600 12px ${titleFontFamily}`
+    context.fillText(style.number, rect.x + spineAtlasCellWidth / 2, rect.y + 19)
+    context.font = `500 10px ${titleFontFamily}`
+    const year = new Date(articles[index].date).getFullYear()
+    if (Number.isFinite(year)) {
+      context.fillText(String(year), rect.x + spineAtlasCellWidth / 2, rect.y + 362)
+    }
+    context.fillStyle = paperLabel ? style.labelInk : style.ink
     const normalizedTitle = articles[index].title.trim().replace(/\s+/g, ' ')
     context.font = `600 ${spineTitleMaxFontSize}px ${titleFontFamily}`
     const naturalWidth = context.measureText(normalizedTitle).width
@@ -280,7 +305,7 @@ export const paintSpineAtlas = (
     context.save()
     context.translate(
       rect.x + spineAtlasCellWidth / 2,
-      rect.y + spineAtlasCellHeight / 2,
+      rect.y + (titleTop + titleBottom) / 2,
     )
     // The glyphs stay in normal horizontal typesetting; the complete line is
     // rotated onto the case so its baseline follows the spine's long axis.
@@ -368,67 +393,59 @@ export const paintArchiveLabel = (
   label.articleIndex = index
 
   const { context } = label
-  paintArchivePaper(context, style, 0, 0, label.logicalWidth, label.logicalHeight)
-  context.strokeStyle = style.rule
-  context.lineWidth = 0.7
-  if (style.variant === 0) {
-    context.strokeRect(18, 18, label.logicalWidth - 36, label.logicalHeight - 36)
-  } else {
-    context.beginPath()
-    if (style.variant === 1) {
-      context.moveTo(36, 83)
-      context.lineTo(348, 83)
-      context.moveTo(36, 490)
-      context.lineTo(348, 490)
-    } else {
-      context.moveTo(20, 24)
-      context.lineTo(20, 552)
-      context.moveTo(36, 83)
-      context.lineTo(83, 83)
-    }
-    context.stroke()
-  }
+  paintArchiveCover(context, style, label.logicalWidth, label.logicalHeight)
 
   context.fillStyle = style.muted
-  context.font = '600 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+  context.font = '600 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
   context.textBaseline = 'top'
   context.textAlign = 'left'
-  context.letterSpacing = '2px'
-  context.fillText(archiveLabel.toLocaleUpperCase(locale), 36, 39)
+  context.letterSpacing = '1.6px'
+  context.fillText(archiveLabel.toLocaleUpperCase(locale), 40, 48)
   context.textAlign = 'right'
+  context.letterSpacing = '0.5px'
   context.fillText(
     `${String(index + 1).padStart(2, '0')} / ${String(count).padStart(2, '0')}`,
-    348,
-    39,
+    346,
+    48,
   )
 
   context.textAlign = 'left'
   context.letterSpacing = '0px'
-  let fontSize = initialTitleFontSize
+  const paperLabel = style.variant === 1
+  const titleLeft = paperLabel ? 55 : 40
+  const maxTitleWidth = paperLabel ? 274 : 304
+  const alignment = style.variant === 0 ? 'center' : titleAlignment
+  let fontSize = Math.max(26, initialTitleFontSize * (paperLabel ? 1 : 1.1))
   let lines: string[] = []
-  do {
-    context.font = `700 ${fontSize}px ${titleFontFamily}`
-    lines = wrapTitle(context, article.title, 306, 5)
-    fontSize -= 2
-  } while (lines.length > 4 && fontSize > 30)
+  while (true) {
+    context.font = `600 ${fontSize}px ${titleFontFamily}`
+    lines = wrapTitle(context, article.title, maxTitleWidth, 6)
+    if (lines.length <= 5 || fontSize <= 23) {
+      break
+    }
+    fontSize -= 1
+  }
 
-  const lineHeight = (fontSize + 2) * 1.14
+  const lineHeight = fontSize * 1.23
   const blockHeight = lines.length * lineHeight
-  const titleTop = (label.logicalHeight - blockHeight) * 0.48
+  const titleCenter = paperLabel ? 277 : style.variant === 3 ? 255 : 285
+  const titleTop = style.variant === 2
+    ? 182 + lineHeight / 2
+    : titleCenter - blockHeight / 2 + lineHeight / 2
   let titleWidth = 1
   for (const line of lines) {
     titleWidth = Math.max(titleWidth, context.measureText(line).width)
   }
-  const titleX = titleAlignment === 'center' ? label.logicalWidth / 2 : 36
+  const titleX = alignment === 'center' ? label.logicalWidth / 2 : titleLeft
   let y = titleTop
   label.titleBounds = {
-    left: titleAlignment === 'center' ? titleX - titleWidth / 2 : titleX,
+    left: alignment === 'center' ? titleX - titleWidth / 2 : titleX,
     top: titleTop - lineHeight / 2,
     width: titleWidth,
     height: blockHeight,
   }
-  context.fillStyle = style.ink
-  context.textAlign = titleAlignment
+  context.fillStyle = paperLabel ? style.labelInk : style.ink
+  context.textAlign = alignment
   context.textBaseline = 'middle'
   for (const line of lines) {
     context.fillText(line, titleX, y)
@@ -436,10 +453,10 @@ export const paintArchiveLabel = (
   }
 
   context.fillStyle = style.muted
-  context.font = '500 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+  context.font = '500 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
   context.textAlign = 'left'
   context.textBaseline = 'bottom'
-  context.fillText(formatDate(article.date, locale), 36, 532)
+  context.fillText(formatDate(article.date, locale), 40, 528)
   label.texture.needsUpdate = true
 }
 

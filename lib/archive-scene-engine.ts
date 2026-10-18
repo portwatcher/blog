@@ -106,7 +106,7 @@ export const createArchiveScene = (
   // Keep every case resident in one instanced draw call. The article count is
   // small enough that recycling a short pool costs more visually (instances
   // pop at either edge) than it saves on even a low-end mobile GPU.
-  const { geometry, material, texture: stockTexture } = createArchiveBookModel()
+  const { geometry, material, texture: stockTexture, clothTexture } = createArchiveBookModel()
   const bookStyles = createArchiveBookStyles(articles, options.theme)
   const cases = new InstancedMesh(geometry, material, articles.length)
   cases.instanceMatrix.setUsage(DynamicDrawUsage)
@@ -117,7 +117,10 @@ export const createArchiveScene = (
   // incoming cases become dedicated meshes while they leave their slots; this
   // keeps depth ordering physical without rebuilding the whole shelf per frame.
   const activeCases = [0, 1].map(() => {
-    const mesh = new Mesh(geometry, material.clone())
+    const activeMaterial = material.clone()
+    activeMaterial.onBeforeCompile = material.onBeforeCompile
+    activeMaterial.customProgramCacheKey = material.customProgramCacheKey
+    const mesh = new Mesh(geometry, activeMaterial)
     mesh.matrixAutoUpdate = false
     mesh.visible = false
     mesh.frustumCulled = false
@@ -130,6 +133,8 @@ export const createArchiveScene = (
   const labelMeshes = labels.map((label) => {
     const labelMaterial = new MeshStandardMaterial({
       map: label.texture,
+      bumpMap: clothTexture,
+      bumpScale: 0.012,
       color: 0xffffff,
       roughness: 0.86,
       metalness: 0,
@@ -159,6 +164,7 @@ export const createArchiveScene = (
   })
   spineAtlas.texture.anisotropy = textureAnisotropy
   stockTexture.anisotropy = textureAnisotropy
+  clothTexture.anisotropy = textureAnisotropy
   const spineLabelMaterial = new MeshStandardMaterial({
     map: spineAtlas.texture,
     color: 0xffffff,
@@ -544,6 +550,7 @@ export const createArchiveScene = (
       geometry.dispose()
       material.dispose()
       stockTexture.dispose()
+      clothTexture.dispose()
       activeCases.forEach((mesh) => mesh.material.dispose())
       labelGeometry.dispose()
       shelfSpineGeometry.dispose()

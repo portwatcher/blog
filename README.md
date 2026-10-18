@@ -50,8 +50,13 @@ horizontally with a fixed height and viewing direction, independent of book
 extraction. Only changing the year moves the camera to another shelf height.
 
 Extraction unfolds over a longer gesture, with immediate input response. Books
-share a rounded hardback model with recessed page edges, subtle paper stocks and
-stable differences in thickness and cover rules. Text uses higher-resolution
+share a rounded hardback model with recessed ivory page edges, even on dark
+covers. Five seeded paper and bookcloth stocks range from warm ivory and blue-grey
+to charcoal, with matching spine numbers, pressed hinges, paper title labels and
+restrained cover frames. A shared cloth relief texture catches the light, while
+paper grain and stable differences in thickness make
+the books distinct while retaining the site's typography and quiet palette.
+Text uses higher-resolution
 canvas textures, trilinear mipmaps and anisotropic filtering alongside hardware
 MSAA. Texture and screen-pixel budgets stay bounded on lower-power devices; the
 shelf remains instanced and only two cover labels are kept in memory.
