@@ -1,63 +1,27 @@
 // Input lives in a continuous travel coordinate. Its strictly positive slope
 // slows movement near each book without thresholds, discarded deltas or locks.
-const browsingSpeed = 2.1
-const selectionSpeed = 0.26
-const speedRatio = Math.sqrt(selectionSpeed / browsingSpeed)
-const approachRadius = 0.18
-const transitionRadius = 0.5 - approachRadius
-const approachTravel = approachRadius / (2 * (approachRadius + transitionRadius * speedRatio))
-const transitionTravel = 0.5 - approachTravel
-const inputTravelScale = selectionSpeed * approachTravel / approachRadius
+const tau = Math.PI * 2
+const resistance = 0.66
 const captureRadius = 0.09
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
 
-export const archiveTravelForInput = (pixels: number, width: number) =>
-  pixels * inputTravelScale / Math.min(570, Math.max(180, width * 0.42))
-
-// Keep the same speed throughout the near-selection zone, then accelerate
-// smoothly into the gap. Analytic inverse maps preserve every input delta and
-// make reversing/batching gestures equivalent, including at the zone boundary.
-export const archivePositionForTravel = (travel: number) => {
-  const center = Math.floor(travel + 0.5)
-  const offset = travel - center
-  const distance = Math.abs(offset)
-  if (distance <= approachTravel) {
-    return center + offset * approachRadius / approachTravel
-  }
-  const phase = (distance - approachTravel) / transitionTravel * Math.PI / 2
-  const transition = Math.atan2(speedRatio * Math.sin(phase), Math.cos(phase)) * 2 / Math.PI
-  return center + Math.sign(offset) * (approachRadius + transitionRadius * transition)
-}
+export const archivePositionForTravel = (travel: number) =>
+  travel - resistance * Math.sin(tau * travel) / tau
 
 export const archiveTravelForPosition = (position: number) => {
-  const center = Math.floor(position + 0.5)
-  const offset = position - center
-  const distance = Math.abs(offset)
-  if (distance <= approachRadius) {
-    return center + offset * approachTravel / approachRadius
+  let travel = position
+  for (let step = 0; step < 8; step++) {
+    travel -= (archivePositionForTravel(travel) - position)
+      / (1 - resistance * Math.cos(tau * travel))
   }
-  const phase = (distance - approachRadius) / transitionRadius * Math.PI / 2
-  const transition = Math.atan2(Math.sin(phase), speedRatio * Math.cos(phase)) * 2 / Math.PI
-  return center + Math.sign(offset) * (approachTravel + transitionTravel * transition)
+  return travel
 }
-
-const presentationRadius = 0.42
-const presentationStart = archiveTravelForPosition(presentationRadius)
-const presentationEnd = archiveTravelForPosition(captureRadius)
 
 export const archivePresentationAt = (position: number, index: number) => {
   const distance = Math.abs(position - index)
-  if (distance >= presentationRadius) {
-    return 0
-  }
-  if (distance <= captureRadius) {
-    return 1
-  }
-  // Pace the pose by gesture distance, not the faster-moving shelf position.
-  // Each pose channel applies its easing once, keeping the pull gradual.
-  return (presentationStart - archiveTravelForPosition(distance))
-    / (presentationStart - presentationEnd)
+  const progress = clamp((0.42 - distance) / (0.42 - captureRadius), 0, 1)
+  return progress ** 3 * (progress * (progress * 6 - 15) + 10)
 }
 
 export const createArchiveNavigation = (first: number, last: number) => {

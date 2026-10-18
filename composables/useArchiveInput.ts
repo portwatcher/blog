@@ -1,5 +1,4 @@
 import type { Ref } from 'vue'
-import { archiveTravelForInput } from '~/lib/archive-navigation'
 
 interface ArchiveInputOptions {
   stage: Ref<HTMLElement | null>
@@ -26,9 +25,11 @@ export const useArchiveInput = (options: ArchiveInputOptions) => {
     axis: 'x' | 'y' | null
   } | null = null
 
-  const travelForPixels = (pixels: number) => archiveTravelForInput(
-    pixels, options.stage.value?.clientWidth || window.innerWidth,
-  )
+  const pixelsPerArticle = () => {
+    const width = options.stage.value?.clientWidth || window.innerWidth
+    // A longer gesture gives extraction room to unfold, without adding lag.
+    return Math.min(570, Math.max(180, width * 0.42))
+  }
 
   const cancel = () => {
     window.clearTimeout(wheelTimer)
@@ -85,7 +86,7 @@ export const useArchiveInput = (options: ArchiveInputOptions) => {
     if (!gesture.axis && (deltaX || deltaY)) {
       gesture.axis = Math.abs(deltaX) >= Math.abs(deltaY) ? 'x' : 'y'
     }
-    const delta = travelForPixels(-(gesture.axis === 'x' ? deltaX : deltaY))
+    const delta = -(gesture.axis === 'x' ? deltaX : deltaY) / pixelsPerArticle()
     const seconds = Math.max(0.001, (event.timeStamp - gesture.time) / 1000)
     const sampleVelocity = delta / seconds
     gesture.velocity += (sampleVelocity - gesture.velocity) * (1 - Math.exp(-30 * seconds))
@@ -123,7 +124,7 @@ export const useArchiveInput = (options: ArchiveInputOptions) => {
       : event.deltaMode === 2 ? (options.stage.value?.clientHeight || 800) : 1
     const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY)
       ? event.deltaX : event.deltaY
-    options.move(travelForPixels(delta * unit))
+    options.move(delta * unit / pixelsPerArticle())
     window.clearTimeout(wheelTimer)
     wheelTimer = window.setTimeout(() => options.release(0), 160)
   }

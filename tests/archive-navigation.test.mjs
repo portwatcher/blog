@@ -5,7 +5,6 @@ import {
   archivePresentationAt,
   archivePositionForTravel,
   archiveTravelForPosition,
-  archiveTravelForInput,
 } from '../lib/archive-navigation.ts'
 
 const settle = (navigation, hz = 60) => {
@@ -28,28 +27,19 @@ test('initial and between-book rests keep every book unselected', () => {
   }
 })
 
-test('pointer and wheel travel stays equally slow near selection and at its center, with fast gaps', () => {
-  // Observable book-distance budgets for a one-pixel gesture on a phone.
-  const zones = [
-    { position: 2.5, minimum: 0.0105, maximum: 0.013 },
-    { position: 2.14, minimum: 0.0013, maximum: 0.0016 },
-    { position: 2.09, minimum: 0.0013, maximum: 0.0016 },
-    { position: 2, minimum: 0.0013, maximum: 0.0016 },
-  ]
+test('every delta moves the scene, with more resistance near a book, in either direction', () => {
   for (const direction of [-1, 1]) {
     const navigation = createArchiveNavigation(0, 5)
-    for (const zone of zones) {
-      navigation.setRange(0, 5, zone.position)
-      const before = navigation.position
-      const delta = archiveTravelForInput(direction, 393)
-      navigation.moveBy(delta)
-      const distance = (navigation.position - before) * direction
-      assert.ok(distance >= zone.minimum && distance <= zone.maximum,
-        `position ${zone.position}, direction ${direction}: moved ${distance} books`)
-      navigation.moveBy(-delta)
-      assert.ok(Math.abs(navigation.position - before) < 1e-10,
-        'reversing the same input must retrace the motion without a dead zone')
-    }
+    navigation.hold(2)
+    const center = navigation.position
+    navigation.moveBy(direction * 0.001)
+    const resisted = Math.abs(navigation.position - center)
+    assert.ok(resisted > 0)
+    navigation.setRange(0, 5, 2.5)
+    navigation.moveBy(direction * 0.001)
+    assert.ok(Math.abs(navigation.position - 2.5) > resisted * 2)
+    navigation.moveBy(-direction * 0.001)
+    assert.ok(Math.abs(navigation.position - 2.5) < 1e-10)
   }
 })
 

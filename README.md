@@ -42,18 +42,14 @@ The app can run against local Markdown under `content/`, but production-style us
 ## Archive 3D Interaction
 
 The archive's 3D view starts with no book selected. Drag horizontally or vertically,
-use a touch swipe, or scroll to browse continuously. Gaps move quickly, with
-the same slower speed near selection and through the selection center;
-keep moving to put the book back and accelerate toward the next one. Release
-within the selection zone to hold that book, or stop between books with nothing
-selected. New input can interrupt settling immediately. While browsing a year
-shelf, the camera pans horizontally with a fixed height and viewing direction,
-independent of book extraction. Only changing the year moves the camera to
-another shelf height.
+use a touch swipe, or scroll to browse continuously. Movement slows near each book;
+keep moving to put it back and pass to the next one. Release within the selection
+zone to hold that book, or stop between books with nothing selected. New input can
+interrupt settling immediately. While browsing a year shelf, the camera pans
+horizontally with a fixed height and viewing direction, independent of book
+extraction. Only changing the year moves the camera to another shelf height.
 
-Extraction follows gesture distance with a single smooth easing over the full
-approach, spreading the pull out rather than thrusting the book forward in a
-short burst. Reversing input immediately retraces the pose. Books
+Extraction unfolds over a longer gesture, with immediate input response. Books
 share a rounded hardback model with recessed page edges, subtle paper stocks and
 stable differences in thickness and cover rules. Text uses higher-resolution
 canvas textures, trilinear mipmaps and anisotropic filtering alongside hardware
