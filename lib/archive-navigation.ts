@@ -29,7 +29,6 @@ export const createArchiveNavigation = (first: number, last: number) => {
   let maximum = last
   let travel = first - 0.5
   let target: number | null = null
-  let velocity = 0
 
   const selectedIndex = () => {
     const position = archivePositionForTravel(travel)
@@ -40,7 +39,6 @@ export const createArchiveNavigation = (first: number, last: number) => {
 
   const moveBy = (delta: number) => {
     target = null
-    velocity = 0
     travel = clamp(travel + delta, minimum - 0.5, maximum + 0.5)
   }
 
@@ -55,25 +53,21 @@ export const createArchiveNavigation = (first: number, last: number) => {
       maximum = lastIndex
       travel = archiveTravelForPosition(clamp(position, minimum - 0.5, maximum + 0.5))
       target = null
-      velocity = 0
     },
     goTo(index: number) {
       target = clamp(index, minimum, maximum)
-      velocity = 0
     },
     deselect() {
       target = clamp(Math.floor(archivePositionForTravel(travel)) + 0.5, minimum - 0.5, maximum + 0.5)
-      velocity = 0
     },
     hold(index: number) {
       travel = clamp(index, minimum, maximum)
       target = null
-      velocity = 0
     },
-    release(releaseVelocity = 0) {
-      target = selectedIndex()
-      // Touch/mouse inertia is ours; wheel events already include OS inertia.
-      velocity = target === null ? clamp(releaseVelocity, -8, 8) : 0
+    release() {
+      // The midpoint decides the resting book. Settle from the current pose;
+      // gesture speed must not carry a release across its chosen midpoint.
+      target = clamp(Math.round(archivePositionForTravel(travel)), minimum, maximum)
     },
     advance(seconds: number) {
       const before = travel
@@ -83,22 +77,6 @@ export const createArchiveNavigation = (first: number, last: number) => {
           travel = target
           target = null
         }
-      } else if (Math.abs(velocity) > 0.015) {
-        const decay = Math.exp(-10 * seconds)
-        travel = clamp(
-          travel + velocity * (1 - decay) / 10,
-          minimum - 0.5,
-          maximum + 0.5,
-        )
-        velocity *= decay
-        if (Math.abs(velocity) < 0.6) {
-          target = selectedIndex()
-        }
-        if (travel === before) {
-          velocity = 0
-        }
-      } else {
-        velocity = 0
       }
       return travel !== before
     },

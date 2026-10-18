@@ -44,9 +44,11 @@ The app can run against local Markdown under `content/`, but production-style us
 The archive opens in 3D by default, with no book selected. The view switch or
 `/archive?view=list` opens the list. Drag horizontally or vertically,
 use a touch swipe, or scroll to browse continuously. Movement slows near each book;
-keep moving to put it back and pass to the next one. Release within the selection
-zone to hold that book, or stop between books with nothing selected. New input can
-interrupt settling immediately. While browsing a year shelf, the camera pans
+keep moving to put it back and pass to the next one. Releasing a drag or finishing
+a scroll smoothly snaps to the nearer book, using the midpoint between adjacent
+books as the threshold in either direction. A release never flings past that
+chosen book. New input can interrupt settling immediately. The initial view and
+Escape still allow every book to remain unselected. While browsing a year shelf, the camera pans
 horizontally with a fixed height and viewing direction, independent of book
 extraction. Only changing the year moves the camera to another shelf height.
 

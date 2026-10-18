@@ -297,8 +297,8 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
       }
       requestDraw()
     },
-    release(velocity) {
-      navigation.release(velocity)
+    release() {
+      navigation.release()
       requestDraw()
     },
     hover(x, y) {
@@ -359,9 +359,10 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
     useFallback('context-lost')
   }
   const onBlur = () => {
-    input.cancel()
-    navigation.release(0)
-    requestDraw()
+    if (input.cancel()) {
+      navigation.release()
+      requestDraw()
+    }
   }
   const onVisibilityChange = () => {
     if (document.hidden) {

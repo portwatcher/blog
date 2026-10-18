@@ -4,7 +4,7 @@ interface ArchiveInputOptions {
   stage: Ref<HTMLElement | null>
   available: () => boolean
   move: (delta: number) => void
-  release: (velocity: number) => void
+  release: () => void
   hover: (x: number, y: number) => void
   navigate: (key: string) => void
   activate: () => void
@@ -20,8 +20,6 @@ export const useArchiveInput = (options: ArchiveInputOptions) => {
     y: number
     startX: number
     startY: number
-    time: number
-    velocity: number
     axis: 'x' | 'y' | null
   } | null = null
 
@@ -32,20 +30,24 @@ export const useArchiveInput = (options: ArchiveInputOptions) => {
   }
 
   const cancel = () => {
+    const active = gesture !== null || wheelTimer !== 0
     window.clearTimeout(wheelTimer)
+    wheelTimer = 0
     const pointerId = gesture?.id
     gesture = null
     dragging.value = false
     if (pointerId !== undefined && options.stage.value?.hasPointerCapture(pointerId)) {
       options.stage.value.releasePointerCapture(pointerId)
     }
+    return active
   }
 
   const onPointerDown = (event: PointerEvent) => {
     if (!event.isPrimary) {
       // Let a second touch become a browser pinch gesture.
-      cancel()
-      options.release(0)
+      if (cancel()) {
+        options.release()
+      }
       return
     }
     if (!options.available() || event.button !== 0) {
@@ -56,6 +58,7 @@ export const useArchiveInput = (options: ArchiveInputOptions) => {
       return
     }
     window.clearTimeout(wheelTimer)
+    wheelTimer = 0
     options.move(0)
     gesture = {
       id: event.pointerId,
@@ -63,8 +66,6 @@ export const useArchiveInput = (options: ArchiveInputOptions) => {
       y: event.clientY,
       startX: event.clientX,
       startY: event.clientY,
-      time: event.timeStamp,
-      velocity: 0,
       axis: null,
     }
     options.stage.value?.setPointerCapture(event.pointerId)
@@ -87,12 +88,8 @@ export const useArchiveInput = (options: ArchiveInputOptions) => {
       gesture.axis = Math.abs(deltaX) >= Math.abs(deltaY) ? 'x' : 'y'
     }
     const delta = -(gesture.axis === 'x' ? deltaX : deltaY) / pixelsPerArticle()
-    const seconds = Math.max(0.001, (event.timeStamp - gesture.time) / 1000)
-    const sampleVelocity = delta / seconds
-    gesture.velocity += (sampleVelocity - gesture.velocity) * (1 - Math.exp(-30 * seconds))
     gesture.x = event.clientX
     gesture.y = event.clientY
-    gesture.time = event.timeStamp
     if (Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY) > 3) {
       dragging.value = true
     }
@@ -105,14 +102,11 @@ export const useArchiveInput = (options: ArchiveInputOptions) => {
     if (!gesture || event.pointerId !== gesture.id) {
       return
     }
-    const velocity = event.type === 'pointerup' && dragging.value
-      ? gesture.velocity * Math.exp(-20 * Math.max(0, event.timeStamp - gesture.time) / 1000)
-      : 0
     if (dragging.value) {
       suppressClickUntil = performance.now() + 350
     }
     cancel()
-    options.release(velocity)
+    options.release()
   }
 
   const onWheel = (event: WheelEvent) => {
@@ -126,7 +120,10 @@ export const useArchiveInput = (options: ArchiveInputOptions) => {
       ? event.deltaX : event.deltaY
     options.move(delta * unit / pixelsPerArticle())
     window.clearTimeout(wheelTimer)
-    wheelTimer = window.setTimeout(() => options.release(0), 160)
+    wheelTimer = window.setTimeout(() => {
+      wheelTimer = 0
+      options.release()
+    }, 160)
   }
 
   const onKeydown = (event: KeyboardEvent) => {

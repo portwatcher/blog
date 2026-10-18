@@ -13,17 +13,40 @@ const settle = (navigation, hz = 60) => {
   }
 }
 
-test('initial and between-book rests keep every book unselected', () => {
+test('initial and explicitly deselected rests keep every book unselected', () => {
   const navigation = createArchiveNavigation(0, 5)
   assert.equal(navigation.selectedIndex, null)
   assert.equal(archivePresentationAt(navigation.position, 0), 0)
-  navigation.moveBy(1)
-  navigation.release()
+  navigation.hold(1)
+  navigation.deselect()
   settle(navigation)
   assert.equal(navigation.selectedIndex, null)
-  assert.equal(navigation.position, 0.5)
-  for (const index of [0, 1]) {
+  assert.equal(navigation.position, 1.5)
+  for (const index of [1, 2]) {
     assert.equal(archivePresentationAt(navigation.position, index), 0)
+  }
+})
+
+test('release sticks to the nearer selected book on either side of each midpoint', () => {
+  const navigation = createArchiveNavigation(0, 5)
+  for (const [from, position, expected] of [
+    [1, 1.49, 1], [1, 1.51, 2],
+    [2, 1.51, 2], [2, 1.49, 1],
+    [2, 2.49, 2], [2, 2.51, 3],
+    [3, 2.51, 3], [3, 2.49, 2],
+    [2, 2.07, 2],
+  ]) {
+    navigation.hold(from)
+    navigation.moveBy(archiveTravelForPosition(position) - navigation.travel)
+    const before = navigation.position
+    navigation.release()
+    assert.equal(navigation.position, before, 'release must not teleport the book')
+    navigation.advance(1 / 60)
+    assert.ok(navigation.position > Math.min(before, expected)
+      && navigation.position < Math.max(before, expected), 'settling must approach the chosen book')
+    settle(navigation)
+    assert.equal(navigation.position, expected, `release at ${position} from ${from}`)
+    assert.equal(navigation.selectedIndex, expected)
   }
 })
 
@@ -43,24 +66,11 @@ test('every delta moves the scene, with more resistance near a book, in either d
   }
 })
 
-test('release in the selection zone settles continuously and holds even after a fast gesture', () => {
-  const navigation = createArchiveNavigation(0, 5)
-  navigation.setRange(0, 5, 2.07)
-  assert.equal(navigation.selectedIndex, 2)
-  const before = navigation.position
-  navigation.release(8)
-  assert.equal(navigation.position, before, 'release must not teleport the book')
-  navigation.advance(1 / 60)
-  assert.ok(navigation.position < before && navigation.position > 2)
-  settle(navigation)
-  assert.equal(navigation.position, 2)
-  assert.equal(navigation.selectedIndex, 2)
-})
-
-test('continuing or reversing input immediately takes over a running settle', () => {
+test('continuing or reversing input immediately takes over a running release snap', () => {
   const navigation = createArchiveNavigation(0, 5)
   navigation.hold(1)
-  navigation.goTo(4)
+  navigation.moveBy(archiveTravelForPosition(1.51) - navigation.travel)
+  navigation.release()
   navigation.advance(1 / 60)
   const before = navigation.position
   navigation.moveBy(-0.001)
@@ -68,9 +78,10 @@ test('continuing or reversing input immediately takes over a running settle', ()
   const interrupted = navigation.position
   settle(navigation)
   assert.equal(navigation.position, interrupted)
-  navigation.moveBy(archiveTravelForPosition(2.5) - navigation.travel)
-  assert.equal(navigation.selectedIndex, null)
-  assert.equal(archivePresentationAt(navigation.position, 2), 0)
+  navigation.moveBy(archiveTravelForPosition(1.49) - navigation.travel)
+  navigation.release()
+  settle(navigation)
+  assert.equal(navigation.selectedIndex, 1)
 })
 
 test('input batching and refresh rate do not change travel or settling', () => {
@@ -81,8 +92,8 @@ test('input batching and refresh rate do not change travel or settling', () => {
     split.moveBy(0.01)
   }
   assert.ok(Math.abs(whole.position - split.position) < 1e-10)
-  whole.goTo(3)
-  split.goTo(3)
+  whole.release()
+  split.release()
   for (let frame = 0; frame < 12; frame++) {
     whole.advance(1 / 60)
   }
@@ -92,21 +103,27 @@ test('input batching and refresh rate do not change travel or settling', () => {
   assert.ok(Math.abs(whole.position - split.position) < 1e-10)
 })
 
-test('single-book shelves, bounds and deselection remain reachable', () => {
+test('release respects shelf bounds and single-book shelves', () => {
   const navigation = createArchiveNavigation(6, 6)
-  navigation.moveBy(100)
-  assert.equal(navigation.position, 6.5)
-  assert.equal(navigation.selectedIndex, null)
-  navigation.goTo(6)
-  settle(navigation)
-  assert.equal(navigation.selectedIndex, 6)
+  for (const delta of [-100, 100]) {
+    navigation.moveBy(delta)
+    assert.equal(navigation.selectedIndex, null)
+    navigation.release()
+    settle(navigation)
+    assert.equal(navigation.position, 6)
+    assert.equal(navigation.selectedIndex, 6)
+  }
   navigation.deselect()
   settle(navigation)
   assert.equal(navigation.selectedIndex, null)
   navigation.setRange(12, 17)
   assert.equal(navigation.position, 11.5)
-  navigation.moveBy(0.5)
-  assert.equal(navigation.selectedIndex, 12)
+  for (const [position, expected] of [[11.5, 12], [17.5, 17]]) {
+    navigation.setRange(12, 17, position)
+    navigation.release()
+    settle(navigation)
+    assert.equal(navigation.selectedIndex, expected)
+  }
 })
 
 test('travel mapping is reversible and continuous across shelf indices', () => {
