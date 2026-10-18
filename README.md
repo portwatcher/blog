@@ -43,7 +43,9 @@ The archive's 3D view starts with no book selected. Drag horizontally or vertica
 use a touch swipe, or scroll to browse continuously. Movement slows near each book;
 keep moving to put it back and pass to the next one. Release within the selection
 zone to hold that book, or stop between books with nothing selected. New input can
-interrupt settling immediately.
+interrupt settling immediately. While browsing a year shelf, the camera pans
+horizontally with a fixed height and viewing direction, independent of book
+extraction. Only changing the year moves the camera to another shelf height.
 
 Extraction unfolds over a longer gesture, with immediate input response. Books
 share a rounded hardback model with recessed page edges, subtle paper stocks and
@@ -62,11 +64,12 @@ Arrow keys / A D select articles, Up / Down / W S change year shelves, and Escap
 puts the book back. Reduced motion, forced colors, save-data and unavailable WebGL
 fall back to the article list.
 
-Run the navigation behavior checks with Node.js 22.18+:
+Run the interaction and rendering checks with Node.js 22.18+:
 
 ```bash
 node --test tests/archive-navigation.test.mjs
 node --test tests/archive-render-quality.test.mjs
+pnpm --package=tsx@4.23.15 dlx tsx --test tests/archive-scene-motion.test.mjs
 ```
 
 ## Content Repo

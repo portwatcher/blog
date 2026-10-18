@@ -63,7 +63,7 @@ export const createArchiveSceneMotion = (
 
   displayRotationObject.rotation.set(-0.16, 0.4, -0.1, 'XYZ')
 
-  const smoothedTarget = new Vector3()
+  let smoothedX = 0
   let smoothedShelfY = shelfY
   let cameraInitialized = false
 
@@ -83,40 +83,37 @@ export const createArchiveSceneMotion = (
     const upperPresentation = presentationForIndex(upper, frame)
     const presentation = Math.max(lowerPresentation, upperPresentation)
     const turn = smootherstep(turnStart, 1, presentation)
-    const lift = smootherstep(0.42, 1, presentation)
     // Linear shelf tracking has no stationary sections or handoff discontinuity.
     const edgeOffset = (frame.position - clamp(
       frame.position, frame.firstIndex, frame.lastIndex,
     )) * spinePitch
     const focusX = mix(shelfXPositions[lower], shelfXPositions[upper], fraction)
       + edgeOffset - 0.1 * turn
-    const focusY = mix(shelfYPositions[lower], shelfYPositions[upper], fraction)
-      + 0.56 * lift
-    const focusZ = shelfZ + pullDistance * slideForPresentation(presentation)
-    const shelfCenter = shelfCenterYPositions[shelfIndexByArticle[lower]] ?? shelfY
-    cameraTarget.set(focusX, focusY, focusZ)
+    const shelfCenter = shelfCenterYPositions[shelfIndexByArticle[frame.firstIndex]] ?? shelfY
     const follow = cameraInitialized ? 1 - Math.exp(-26 * frame.deltaSeconds) : 1
-    smoothedTarget.lerp(cameraTarget, follow)
+    smoothedX = mix(smoothedX, focusX, follow)
     smoothedShelfY = mix(smoothedShelfY, shelfCenter, follow)
     cameraInitialized = true
-    const moving = smoothedTarget.distanceToSquared(cameraTarget) > 0.000001
+    const moving = Math.abs(smoothedX - focusX) > 0.001
       || Math.abs(smoothedShelfY - shelfCenter) > 0.001
     if (!moving) {
-      smoothedTarget.copy(cameraTarget)
+      smoothedX = focusX
       smoothedShelfY = shelfCenter
     }
-    const selected = smootherstep(0, 1, frame.selectionProgress)
-    const shoulder = camera.aspect < 0.72 ? 0.18 : 0.3
+    // Track the shelf, not the rising/receding covers. A fixed look direction
+    // keeps stationary books vertically still during a horizontal pan. Only an
+    // explicit year change moves both camera and target to another shelf height.
     camera.position.set(
-      smoothedTarget.x + shoulder * (1 - selected),
+      smoothedX,
       smoothedShelfY + (cameraY - shelfY),
       shelfZ + cameraDistance + cameraDepthOffset,
     )
-    camera.lookAt(smoothedTarget)
-    keyLight.position.set(smoothedTarget.x - 4.5, smoothedTarget.y + 6, smoothedTarget.z + 7)
-    keyLight.target.position.copy(smoothedTarget)
-    fillLight.position.set(smoothedTarget.x + 5, smoothedTarget.y - 1.5, smoothedTarget.z + 4)
-    fillLight.target.position.copy(smoothedTarget)
+    cameraTarget.set(smoothedX, smoothedShelfY + 0.56, shelfZ + pullDistance)
+    camera.lookAt(cameraTarget)
+    keyLight.position.set(cameraTarget.x - 4.5, cameraTarget.y + 6, cameraTarget.z + 7)
+    keyLight.target.position.copy(cameraTarget)
+    fillLight.position.set(cameraTarget.x + 5, cameraTarget.y - 1.5, cameraTarget.z + 4)
+    fillLight.target.position.copy(cameraTarget)
     return moving
   }
 
