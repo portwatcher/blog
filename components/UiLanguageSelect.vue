@@ -90,4 +90,26 @@ select:focus-visible {
   outline: 2px solid var(--color-heading);
   outline-offset: 2px;
 }
+
+@media (max-width: 22.4375rem) {
+  .ui-language select {
+    width: 2.75rem;
+    padding: 0;
+    opacity: 0;
+  }
+
+  .ui-language .ui-language__icon {
+    left: 0.5rem;
+  }
+
+  .ui-language__chevron {
+    right: 0.375rem;
+  }
+
+  .ui-language:focus-within {
+    border-radius: 0.3rem;
+    outline: 2px solid var(--color-heading);
+    outline-offset: 2px;
+  }
+}
 </style>

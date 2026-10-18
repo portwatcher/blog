@@ -125,10 +125,6 @@ const isArchive = computed(() => route.path === '/archive')
 }
 
 @media (max-width: 30rem) {
-  .site-shell {
-    --site-header-height: 5.6875rem;
-  }
-
   .site-header {
     justify-content: space-between;
     gap: 0.5rem;
@@ -137,10 +133,21 @@ const isArchive = computed(() => route.path === '/archive')
   }
 
   .site-menu {
-    display: grid;
-    grid-template-columns: repeat(2, max-content);
-    column-gap: clamp(1rem, 5vw, 2rem);
-    row-gap: 0;
+    min-width: 0;
+    gap: 0.5rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .site-menu a {
+    flex-shrink: 0;
+    min-width: 2.75rem;
+    justify-content: center;
+    white-space: nowrap;
+  }
+
+  .site-menu a:focus-visible {
+    outline-offset: -2px;
   }
 }
 </style>
