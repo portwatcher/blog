@@ -377,7 +377,6 @@ export const paintArchiveLabel = (
   label: ArchiveLabel,
   article: ArchiveSceneArticle,
   index: number,
-  count: number,
   locale: string,
   titleFontFamily: string,
   initialTitleFontSize: number,
@@ -399,15 +398,10 @@ export const paintArchiveLabel = (
   context.fillStyle = style.muted
   context.font = '600 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
   context.textBaseline = 'top'
-  context.textAlign = 'right'
-  context.letterSpacing = '0.5px'
-  const volumeNumber = `${String(index + 1).padStart(2, '0')} / ${String(count).padStart(2, '0')}`
-  context.fillText(volumeNumber, 346, 48)
-  const categoryWidth = 346 - context.measureText(volumeNumber).width - 18 - 40
   context.textAlign = 'left'
   context.letterSpacing = '1.6px'
   context.fillText(
-    truncateLabelText(context, categoryTitle.toLocaleUpperCase(locale), categoryWidth),
+    truncateLabelText(context, categoryTitle.toLocaleUpperCase(locale), 306),
     40, 48,
   )
 

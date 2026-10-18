@@ -58,8 +58,8 @@ restrained cover frames. A shared cloth relief texture catches the light, while
 paper grain and stable differences in thickness make
 the books distinct while retaining the site's typography and quiet palette.
 Each cover's top line shows its category title from `categories/` (falling back to
-the article's category when no category document exists). Long category titles
-are shortened to keep the volume number clear.
+the article's category when no category document exists), without a book counter.
+Long category titles are shortened to fit the cover.
 Text uses higher-resolution
 canvas textures, trilinear mipmaps and anisotropic filtering alongside hardware
 MSAA. Texture and screen-pixel budgets stay bounded on lower-power devices; the

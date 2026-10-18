@@ -287,7 +287,6 @@ export const createArchiveScene = (
       label,
       article,
       articleIndex,
-      articles.length,
       locale,
       titleFontFamily,
       cardTitleFontSize,
