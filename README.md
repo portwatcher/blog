@@ -60,6 +60,8 @@ the books distinct while retaining the site's typography and quiet palette.
 Each cover's top line shows its category title from `categories/` (falling back to
 the article's category when no category document exists), without a book counter.
 Long category titles are shortened to fit the cover.
+Cover titles keep Latin words intact when wrapping, including words next to
+Chinese or Japanese text. Unusually long words reduce the title size to fit.
 Text uses higher-resolution
 canvas textures, trilinear mipmaps and anisotropic filtering alongside hardware
 MSAA. Texture and screen-pixel budgets stay bounded on lower-power devices; the
@@ -78,9 +80,7 @@ fall back to the article list.
 Run the interaction and rendering checks with Node.js 22.18+:
 
 ```bash
-node --test tests/archive-navigation.test.mjs
-node --test tests/archive-render-quality.test.mjs
-pnpm --package=tsx@4.23.15 dlx tsx --test tests/archive-scene-motion.test.mjs
+pnpm --package=tsx@4.23.15 dlx tsx --test tests/archive-*.test.mjs
 ```
 
 ## Content Repo

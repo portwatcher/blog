@@ -47,51 +47,48 @@ const formatDate = (value: string, locale: string) => {
   return formatter.format(date)
 }
 
+const segmentTitle = (title: string) =>
+  title.trim().replace(/\s+/g, ' ').match(
+    /[\p{Script=Latin}\p{M}\p{N}_]+(?:['’.\-][\p{Script=Latin}\p{M}\p{N}_]+)*|\s+|[^\s]/gu,
+  ) || []
+
 const wrapTitle = (
   context: CanvasRenderingContext2D,
-  title: string,
+  segments: string[],
   maxWidth: number,
   maxLines: number,
 ) => {
-  const segments = /\s/.test(title)
-    ? title.trim().split(/\s+/)
-    : Array.from(title.trim())
-  const separator = /\s/.test(title) ? ' ' : ''
   const lines: string[] = []
   let line = ''
 
   for (const segment of segments) {
-    const candidate = line ? `${line}${separator}${segment}` : segment
-    if (line && context.measureText(candidate).width > maxWidth) {
-      lines.push(line)
-      line = segment
+    const candidate = `${line}${segment}`
+    if (line.trim() && context.measureText(candidate).width > maxWidth) {
+      lines.push(line.trimEnd())
+      line = segment.trimStart()
     } else {
       line = candidate
     }
-
-    if (lines.length === maxLines) {
-      break
-    }
   }
 
-  if (line && lines.length < maxLines) {
-    lines.push(line)
+  if (line.trim()) {
+    lines.push(line.trimEnd())
   }
-  if (
-    lines.length === maxLines
-    && segments.join(separator) !== lines.join(separator)
-  ) {
-    let last = lines[maxLines - 1]
+  if (lines.length > maxLines) {
+    const last = segmentTitle(lines[maxLines - 1])
     while (
       last.length > 1
-      && context.measureText(`${last}…`).width > maxWidth
+      && context.measureText(`${last.join('').trimEnd()}…`).width > maxWidth
     ) {
-      last = last.slice(0, -1)
+      last.pop()
     }
-    lines[maxLines - 1] = `${last}…`
+    if (context.measureText(`${last.join('').trimEnd()}…`).width > maxWidth) {
+      last.pop()
+    }
+    lines[maxLines - 1] = `${last.join('').trimEnd()}…`
   }
 
-  return lines
+  return lines.slice(0, maxLines)
 }
 
 export const createArchiveLabel = (lowPower: boolean, maxTextureSize: number) => {
@@ -412,10 +409,14 @@ export const paintArchiveLabel = (
   const maxTitleWidth = paperLabel ? 274 : 304
   const alignment = style.variant === 0 ? 'center' : titleAlignment
   let fontSize = Math.max(26, initialTitleFontSize * (paperLabel ? 1 : 1.1))
+  const titleSegments = segmentTitle(article.title)
+  context.font = `600 ${fontSize}px ${titleFontFamily}`
+  const widestSegment = Math.max(1, ...titleSegments.map((segment) => context.measureText(segment).width))
+  fontSize *= Math.min(1, maxTitleWidth / widestSegment)
   let lines: string[] = []
   while (true) {
     context.font = `600 ${fontSize}px ${titleFontFamily}`
-    lines = wrapTitle(context, article.title, maxTitleWidth, 6)
+    lines = wrapTitle(context, titleSegments, maxTitleWidth, 6)
     if (lines.length <= 5 || fontSize <= 23) {
       break
     }
