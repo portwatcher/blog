@@ -65,7 +65,7 @@ const getRequestedTranslationLang = (
   return matched || ''
 }
 
-const withCompatibilityFields = (article: ArticleDocument) => ({
+const withCompatibilityFields = <T extends ArticleDocument>(article: T) => ({
   ...article,
   _path: article._path || article.path,
   _dir: article._dir || getArticleCategory(article),
@@ -300,9 +300,9 @@ export default defineEventHandler(async (event) => {
   const ip = getClientIP(event)
   const requestedPath = query.path ? String(query.path) : ''
   const { articles } = await getRuntimeContent(event)
-  let docs = articles
+  let docs: ArticleDocument[] = articles
     .filter((article) => article.status !== 'draft')
-    .map(withCompatibilityFields) as ArticleDocument[]
+    .map(withCompatibilityFields)
 
   if (query.title) {
     docs = docs.filter((doc) => String(doc.title || '') === String(query.title))

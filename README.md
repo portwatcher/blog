@@ -37,6 +37,9 @@ pnpm dev
 
 Open `http://localhost:3000`.
 
+Run `pnpm typecheck` to generate Nuxt types and check the project's TypeScript,
+and `pnpm build` to verify the production build.
+
 The app can run against local Markdown under `content/`, but production-style usage expects a separate content repository.
 
 ## Archive 3D Interaction

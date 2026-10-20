@@ -1,5 +1,6 @@
 import { GetObjectCommand } from '@aws-sdk/client-s3'
 import { createError, getHeader, getQuery, sendStream } from 'h3'
+import { Readable } from 'node:stream'
 import {
   assertManagedMediaKey,
   assertS3MediaConfigured,
@@ -58,7 +59,10 @@ export default defineEventHandler(async (event) => {
       event.node.res.setHeader('last-modified', response.LastModified.toUTCString())
     }
 
-    return sendStream(event, response.Body as NodeJS.ReadableStream)
+    const body = response.Body instanceof Readable
+      ? response.Body
+      : response.Body.transformToWebStream()
+    return sendStream(event, body)
   } catch (error: any) {
     if (error?.statusCode) throw error
 

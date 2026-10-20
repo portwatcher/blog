@@ -21,7 +21,9 @@ import type { H3Event } from 'h3'
 const execFileAsync = promisify(execFile)
 const defaultCacheTtlMs = 0
 
-export type RuntimeArticleDocument = Record<string, any>
+export type RuntimeArticleDocument = Record<string, any> & {
+  path: string
+}
 
 export interface RuntimeContent {
   articles: RuntimeArticleDocument[]

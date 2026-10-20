@@ -5,6 +5,7 @@
   "version": "0.0.9",
   "scripts": {
     "build": "nuxt build",
+    "typecheck": "nuxt prepare && tsc --noEmit",
     "cms:s3-cors": "node scripts/configure-s3-cors.mjs",
     "content:init": "node scripts/init-content-repo.mjs",
     "dev": "nuxt dev",
