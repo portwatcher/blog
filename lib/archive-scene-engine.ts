@@ -3,9 +3,7 @@ import {
   BufferGeometry,
   Color,
   DirectionalLight,
-  DynamicDrawUsage,
   HemisphereLight,
-  InstancedMesh,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
@@ -19,7 +17,6 @@ import {
 } from 'three'
 import {
   createArchiveLabel,
-  createShelfSpineGeometry,
   createSpineAtlas,
   createYearLabelTexture,
   paintArchiveLabel,
@@ -44,6 +41,7 @@ import { createArchiveSceneInteraction } from './archive-scene-interaction'
 import { createArchiveSceneLayout } from './archive-scene-layout'
 import { createArchiveSceneMotion } from './archive-scene-motion'
 import { createArchiveActiveSpine } from './archive-scene-spines'
+import { createArchiveShelves } from './archive-scene-shelves'
 import type { ArchiveActiveSpine } from './archive-scene-spines'
 import type {
   ArchiveSceneEngine,
@@ -102,19 +100,12 @@ export const createArchiveScene = (
     fillLight.target,
   )
 
-  // Keep every case resident in one instanced draw call. The article count is
-  // small enough that recycling a short pool costs more visually (instances
-  // pop at either edge) than it saves on even a low-end mobile GPU.
+  // Share the book model and materials across independently culled year rows.
   const { geometry, material, texture: stockTexture, clothTexture } = createArchiveBookModel()
   const bookStyles = createArchiveBookStyles(articles, options.theme)
-  const cases = new InstancedMesh(geometry, material, articles.length)
-  cases.instanceMatrix.setUsage(DynamicDrawUsage)
-  cases.frustumCulled = false
-  scene.add(cases)
 
-  // The fixed shelf remains one instanced draw call. Only the outgoing and
-  // incoming cases become dedicated meshes while they leave their slots; this
-  // keeps depth ordering physical without rebuilding the whole shelf per frame.
+  // Extracted books stay outside the static rows so their animation remains
+  // visible even when the camera no longer intersects their resting slots.
   const activeCases = [0, 1].map(() => {
     const activeMaterial = material.clone()
     activeMaterial.onBeforeCompile = material.onBeforeCompile
@@ -181,24 +172,21 @@ export const createArchiveScene = (
   spineLabelOffsetObject.rotation.y = -Math.PI / 2
   spineLabelOffsetObject.updateMatrix()
   const spineLabelOffset = spineLabelOffsetObject.matrix.clone()
-  const hiddenMatrix = new Matrix4().makeScale(0, 0, 0)
   const layout = createArchiveSceneLayout(articles)
   const {
-    restMatrices,
     shelfCenterYPositions,
     shelfGroups,
   } = layout
-  const {
-    geometry: shelfSpineGeometry,
-    restPositions: shelfSpineRestPositions,
-  } = createShelfSpineGeometry(
-    restMatrices,
+  const shelves = createArchiveShelves({
+    geometry,
+    material,
+    layout,
+    styles: bookStyles,
     spineLabelOffset,
-    spineAtlas.rects,
-  )
-  const shelfSpineMesh = new Mesh(shelfSpineGeometry, spineLabelMaterial)
-  shelfSpineMesh.frustumCulled = false
-  scene.add(shelfSpineMesh)
+    spineRects: spineAtlas.rects,
+    spineMaterial: spineLabelMaterial,
+  })
+  shelves.batches.forEach(({ group }) => scene.add(group))
 
   const yearLabelGeometry = new PlaneGeometry(
     yearLabelWidth,
@@ -218,7 +206,6 @@ export const createArchiveScene = (
       (shelfCenterYPositions[shelfIndex] ?? shelfY) + yearLabelYOffset,
       shelfZ + 0.2,
     )
-    mesh.frustumCulled = false
     scene.add(mesh)
     return { material: yearMaterial, texture }
   })
@@ -251,19 +238,6 @@ export const createArchiveScene = (
   let height = 1
   let cardTitleFontSize = 27
   let cardTitleAlignment: 'left' | 'center' = 'center'
-  let hiddenIndexA = -1
-  let hiddenIndexB = -1
-  let hiddenSpineIndexA = -1
-  let hiddenSpineIndexB = -1
-
-  restMatrices.forEach((matrix, articleIndex) => {
-    cases.setMatrixAt(articleIndex, matrix)
-    cases.setColorAt(articleIndex, bookStyles[articleIndex].color)
-  })
-  cases.instanceMatrix.needsUpdate = true
-  if (cases.instanceColor) {
-    cases.instanceColor.needsUpdate = true
-  }
 
   const setLabelMatrix = (
     mesh: Mesh,
@@ -312,96 +286,6 @@ export const createArchiveScene = (
     const pose = motion.getPose(articleIndex, frame)
     mesh.matrix.copy(pose.matrix).multiply(spineLabelOffset)
     mesh.visible = true
-  }
-
-  const syncActiveShelfCases = (indexA: number, indexB: number) => {
-    let changed = false
-    const hiddenAIsActive = hiddenIndexA >= 0
-      && (hiddenIndexA === indexA || hiddenIndexA === indexB)
-    const hiddenBIsActive = hiddenIndexB >= 0
-      && (hiddenIndexB === indexA || hiddenIndexB === indexB)
-
-    if (hiddenIndexA >= 0 && !hiddenAIsActive) {
-      cases.setMatrixAt(hiddenIndexA, restMatrices[hiddenIndexA])
-      changed = true
-    }
-    if (
-      hiddenIndexB >= 0
-      && hiddenIndexB !== hiddenIndexA
-      && !hiddenBIsActive
-    ) {
-      cases.setMatrixAt(hiddenIndexB, restMatrices[hiddenIndexB])
-      changed = true
-    }
-
-    const indexAWasHidden = indexA === hiddenIndexA || indexA === hiddenIndexB
-    const indexBWasHidden = indexB === hiddenIndexA || indexB === hiddenIndexB
-    if (indexA >= 0 && !indexAWasHidden) {
-      cases.setMatrixAt(indexA, hiddenMatrix)
-      changed = true
-    }
-    if (indexB >= 0 && indexB !== indexA && !indexBWasHidden) {
-      cases.setMatrixAt(indexB, hiddenMatrix)
-      changed = true
-    }
-
-    hiddenIndexA = indexA
-    hiddenIndexB = indexB
-    if (changed) {
-      cases.instanceMatrix.needsUpdate = true
-    }
-  }
-
-  const setShelfSpineVisible = (articleIndex: number, visible: boolean) => {
-    if (articleIndex < 0 || articleIndex >= articles.length) {
-      return false
-    }
-    const position = shelfSpineGeometry.getAttribute('position')
-    const offset = articleIndex * 12
-
-    if (visible) {
-      for (let component = 0; component < 12; component++) {
-        position.array[offset + component] =
-          shelfSpineRestPositions[offset + component]
-      }
-    } else {
-      const x = shelfSpineRestPositions[offset]
-      const y = shelfSpineRestPositions[offset + 1]
-      const z = shelfSpineRestPositions[offset + 2]
-      for (let vertex = 0; vertex < 4; vertex++) {
-        position.setXYZ(articleIndex * 4 + vertex, x, y, z)
-      }
-    }
-    return true
-  }
-
-  const syncActiveShelfSpines = (indexA: number, indexB: number) => {
-    const previous = [hiddenSpineIndexA, hiddenSpineIndexB]
-      .filter(
-        (index, slot, values) => index >= 0 && values.indexOf(index) === slot,
-      )
-    const next = [indexA, indexB]
-      .filter(
-        (index, slot, values) => index >= 0 && values.indexOf(index) === slot,
-      )
-    let changed = false
-
-    for (const articleIndex of previous) {
-      if (!next.includes(articleIndex)) {
-        changed = setShelfSpineVisible(articleIndex, true) || changed
-      }
-    }
-    for (const articleIndex of next) {
-      if (!previous.includes(articleIndex)) {
-        changed = setShelfSpineVisible(articleIndex, false) || changed
-      }
-    }
-
-    hiddenSpineIndexA = indexA
-    hiddenSpineIndexB = indexB
-    if (changed) {
-      shelfSpineGeometry.getAttribute('position').needsUpdate = true
-    }
   }
 
   const setActiveCase = (
@@ -502,8 +386,8 @@ export const createArchiveScene = (
     const lower = clamp(Math.floor(frame.position), frame.firstIndex, frame.lastIndex)
     const upper = clamp(Math.ceil(frame.position), frame.firstIndex, frame.lastIndex)
     const secondIndex = upper === lower ? -1 : upper
-    syncActiveShelfSpines(lower, secondIndex)
-    syncActiveShelfCases(lower, secondIndex)
+    shelves.syncActiveArticles(lower, secondIndex)
+    shelves.updateVisibility(camera)
     setActiveCase(activeCases[0], lower, frame)
     setActiveCase(activeCases[1], secondIndex, frame)
     setActiveSpineLabels(lower, upper, frame)
@@ -515,7 +399,7 @@ export const createArchiveScene = (
   const interaction = createArchiveSceneInteraction({
     activeCases,
     camera,
-    cases,
+    shelves: shelves.batches,
     getFrame: () => currentFrame,
     getSize: () => ({ width, height }),
     host,
@@ -550,7 +434,7 @@ export const createArchiveScene = (
       clothTexture.dispose()
       activeCases.forEach((mesh) => mesh.material.dispose())
       labelGeometry.dispose()
-      shelfSpineGeometry.dispose()
+      shelves.destroy()
       yearLabelGeometry.dispose()
       yearLabels.forEach(({ material: yearMaterial, texture }) => {
         yearMaterial.dispose()

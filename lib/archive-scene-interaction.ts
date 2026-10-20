@@ -4,9 +4,9 @@ import {
   Vector3,
 } from 'three'
 import type {
-  InstancedMesh,
   Matrix4,
   Mesh,
+  Object3D,
   PerspectiveCamera,
 } from 'three'
 import type { ArchiveLabel } from './archive-scene-assets'
@@ -18,6 +18,7 @@ import {
   labelWidth,
 } from './archive-scene-constants'
 import type { ArchiveSceneMotion } from './archive-scene-motion'
+import type { ArchiveShelfBatch } from './archive-scene-shelves'
 import type {
   ArchiveSceneFrame,
   ArchiveSceneRects,
@@ -26,7 +27,7 @@ import type {
 interface ArchiveSceneInteractionOptions {
   activeCases: Mesh[]
   camera: PerspectiveCamera
-  cases: InstancedMesh
+  shelves: ArchiveShelfBatch[]
   getFrame: () => ArchiveSceneFrame
   getSize: () => { width: number, height: number }
   host: HTMLElement
@@ -40,7 +41,7 @@ export const createArchiveSceneInteraction = (
   const {
     activeCases,
     camera,
-    cases,
+    shelves,
     getFrame,
     getSize,
     host,
@@ -50,6 +51,9 @@ export const createArchiveSceneInteraction = (
   const pickPoint = new Vector2()
   const raycaster = new Raycaster()
   const projectedPoint = new Vector3()
+  const shelfByMesh = new Map<Object3D, ArchiveShelfBatch>(
+    shelves.map((shelf) => [shelf.cases, shelf]),
+  )
 
   const projectBounds = (
     matrix: Matrix4,
@@ -159,12 +163,13 @@ export const createArchiveSceneInteraction = (
     )
     raycaster.setFromCamera(pickPoint, camera)
     const intersections = raycaster.intersectObjects(
-      [cases, ...activeCases],
+      [...shelves.filter(({ group }) => group.visible).map(({ cases }) => cases), ...activeCases],
       false,
     )
     for (const intersection of intersections) {
-      if (intersection.object === cases) {
-        return intersection.instanceId ?? null
+      const shelf = shelfByMesh.get(intersection.object)
+      if (shelf && intersection.instanceId !== undefined) {
+        return shelf.articleIndices[intersection.instanceId] ?? null
       }
       const articleIndex: unknown = intersection.object.userData.articleIndex
       if (

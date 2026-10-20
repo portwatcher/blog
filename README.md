@@ -74,6 +74,11 @@ CPU core counts do not lower text resolution. High-precision texture coordinates
 and two reusable close-up spine textures keep extracted titles sharp without
 enlarging the shared shelf atlas.
 
+Books and spine labels are batched by year. Each row's bounding box is checked
+against the camera frustum before drawing, so rows outside the view do not submit
+their geometry to the GPU. Partially visible rows remain rendered during year
+changes, and extracted books animate independently of their resting row.
+
 Click a spine to select it, then click the presented book to open the article.
 Arrow keys / A D select articles, Up / Down / W S change year shelves, and Escape
 puts the book back. Reduced motion, forced colors, save-data and unavailable WebGL
