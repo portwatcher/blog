@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:lts AS base
+FROM node:24 AS base
 RUN apt-get update && \
   apt-get install -y --no-install-recommends ca-certificates git git-lfs && \
   git lfs install --system && \

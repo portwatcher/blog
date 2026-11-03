@@ -320,6 +320,8 @@ The image is not content-bound. It reads `NUXT_PUBLIC_CMS_CONTENT_REPO` or `BLOG
 
 ## Docker Build
 
+The Docker image uses Node.js 24.
+
 The Docker build does not read private content and does not need content credentials.
 
 ```bash
