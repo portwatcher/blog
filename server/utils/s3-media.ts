@@ -252,7 +252,7 @@ export const createMultipartUpload = async (input: {
     Key: key,
     ContentType: input.contentType,
     Metadata: {
-      originalFilename: input.filename,
+      originalFilename: encodeURIComponent(input.filename),
     },
   }))
 
