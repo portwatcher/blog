@@ -42,6 +42,29 @@ export default defineNuxtConfig({
     '@primevue/nuxt-module',
   ],
   primevue: {
+    // The module inlines the styles of every registered component into the
+    // <head> of every page, so registering all of PrimeVue (its default) adds
+    // about 430 kB of CSS to each HTML response. Register only the components
+    // the templates use: Divider on the home page, the rest on /shelf.
+    // `Divider` here takes precedence over `components/Divider.vue`.
+    components: {
+      include: [
+        'Divider',
+        'Tabs',
+        'TabList',
+        'Tab',
+        'TabPanels',
+        'TabPanel',
+        'Rating',
+        'RadioButton',
+        'Paginator',
+      ],
+    },
+    // No PrimeVue directives (v-tooltip, v-ripple, ...) or composables
+    // (useToast, useConfirm, ...) are used. Components that need Ripple
+    // import it themselves.
+    directives: { include: [] },
+    composables: { include: [] },
     options: {
       theme: {
         preset: BlogPreset,
