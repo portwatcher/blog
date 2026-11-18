@@ -1,6 +1,7 @@
 import { getHeader, type H3Event } from 'h3'
 import { useRuntimeConfig } from '#imports'
 import { getCmsAuthMode } from './cms-github'
+import { friendLinksFile } from './friend-links'
 
 const yamlBoolean = (value: unknown) => value === true || value === 'true' || value === '1'
 
@@ -147,6 +148,52 @@ export const getAdminCmsConfig = (event: H3Event) => {
             name: 'body',
             widget: 'markdown',
             hint: 'Rich text: Add Component -> S3 Image or S3 Video. Markdown mode: paste or drop an image/video to upload and insert it.',
+          },
+        ],
+      },
+      {
+        name: 'links',
+        label: 'Friend Links',
+        files: [
+          {
+            name: 'friends',
+            label: 'Friend Links',
+            file: friendLinksFile,
+            format: 'frontmatter',
+            fields: [
+              {
+                label: 'Page title',
+                name: 'title',
+                widget: 'string',
+                required: false,
+                hint: 'Leave empty to use the localized menu title.',
+              },
+              { label: 'Introduction', name: 'description', widget: 'text', required: false },
+              {
+                label: 'Links',
+                name: 'links',
+                widget: 'list',
+                required: false,
+                summary: '{{fields.name}} - {{fields.url}}',
+                fields: [
+                  { label: 'Name', name: 'name', widget: 'string' },
+                  {
+                    label: 'URL',
+                    name: 'url',
+                    widget: 'string',
+                    pattern: ['^https?://', 'URL must start with http:// or https://'],
+                  },
+                  { label: 'Description', name: 'description', widget: 'string', required: false },
+                  {
+                    label: 'Avatar URL',
+                    name: 'avatar',
+                    widget: 'string',
+                    required: false,
+                    pattern: ['^(https?://.*)?$', 'Avatar must be an http:// or https:// URL'],
+                  },
+                ],
+              },
+            ],
           },
         ],
       },

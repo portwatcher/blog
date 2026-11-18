@@ -11,6 +11,7 @@ export default defineEventHandler(async (event) => {
     ok: true,
     articles: content.articles.length,
     translations: content.translations.length,
+    friendLinks: content.friendLinks.links.length,
     refreshedAt: status.refreshedAt ? new Date(status.refreshedAt).toISOString() : undefined,
   }
 })

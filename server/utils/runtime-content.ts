@@ -17,6 +17,12 @@ import rehypeMathjax from 'rehype-mathjax'
 import remarkMath from 'remark-math'
 import { useRuntimeConfig } from '#imports'
 import type { H3Event } from 'h3'
+import {
+  emptyFriendLinks,
+  friendLinksFile,
+  normalizeFriendLinks,
+  type FriendLinksDocument,
+} from './friend-links'
 
 const execFileAsync = promisify(execFile)
 const defaultCacheTtlMs = 0
@@ -28,6 +34,7 @@ export type RuntimeArticleDocument = Record<string, any> & {
 export interface RuntimeContent {
   articles: RuntimeArticleDocument[]
   translations: RuntimeArticleDocument[]
+  friendLinks: FriendLinksDocument
 }
 
 interface RuntimeContentConfig {
@@ -61,6 +68,7 @@ let pendingRuntimeContent: { key: string, promise: Promise<RuntimeContent> } | u
 const emptyRuntimeContent: RuntimeContent = {
   articles: [],
   translations: [],
+  friendLinks: emptyFriendLinks,
 }
 
 const readString = (runtimeValue: unknown, envNames: string[], fallback = '') => {
@@ -454,6 +462,21 @@ const readCategoryTitles = async (files: FileRef[]) => {
   return new Map(entries)
 }
 
+const readFriendLinks = async (file?: FileRef) => {
+  if (!file) {
+    return emptyFriendLinks
+  }
+
+  const parser = await parserPromise
+  const raw = await readFile(file.absolutePath, 'utf8')
+  const { data } = await parser(raw)
+  return normalizeFriendLinks(data)
+}
+
+const isNonArticleFile = (relativePath: string) =>
+  matchesPattern(relativePath, 'categories/**/*.md') ||
+  matchesPattern(relativePath, 'links/**/*.md')
+
 const loadRuntimeContentFromRoot = async (root: string, config: RuntimeContentConfig): Promise<RuntimeContent> => {
   const files = await collectMarkdownFiles(root)
   const categoryFiles = files.filter((file) =>
@@ -465,12 +488,14 @@ const loadRuntimeContentFromRoot = async (root: string, config: RuntimeContentCo
   const articleFiles = files.filter((file) =>
     matchesAnyPattern(file.relativePath, config.articleIncludes) &&
     !matchesAnyPattern(file.relativePath, config.translationIncludes) &&
-    !matchesPattern(file.relativePath, 'categories/**/*.md')
+    !isNonArticleFile(file.relativePath)
   )
-  const [articles, translations, categoryTitles] = await Promise.all([
+  const friendLinksSource = files.find((file) => file.relativePath === friendLinksFile)
+  const [articles, translations, categoryTitles, friendLinks] = await Promise.all([
     Promise.all(articleFiles.map((file) => parseMarkdownDocument(file, root, 'articles', config))),
     Promise.all(translationFiles.map((file) => parseMarkdownDocument(file, root, 'translations', config))),
     readCategoryTitles(categoryFiles),
+    readFriendLinks(friendLinksSource),
   ])
   const withCategoryTitle = (article: RuntimeArticleDocument) => ({
     ...article,
@@ -480,6 +505,7 @@ const loadRuntimeContentFromRoot = async (root: string, config: RuntimeContentCo
   return {
     articles: articles.map(withCategoryTitle).sort(sortArticlesByDateDesc),
     translations: translations.map(withCategoryTitle),
+    friendLinks,
   }
 }
 
@@ -556,6 +582,7 @@ export const getRuntimeContentStatus = (event?: H3Event) => {
     expiresAt: Number.isFinite(cache?.expiresAt) ? cache?.expiresAt : undefined,
     articles: cache?.value.articles.length ?? 0,
     translations: cache?.value.translations.length ?? 0,
+    friendLinks: cache?.value.friendLinks.links.length ?? 0,
   }
 }
 

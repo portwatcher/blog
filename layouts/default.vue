@@ -16,6 +16,7 @@
         <NuxtLink to="/shelf">
           {{ $t('shelf') }}
         </NuxtLink>
+        <NuxtLink to="/friends">{{ $t('friends') }}</NuxtLink>
       </nav>
       <UiLanguageSelect />
     </header>

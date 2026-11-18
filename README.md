@@ -14,6 +14,7 @@ Personal blog implementing the Classify theme of [Farbox](https://github.com/hep
 - Archive pages grouped by year
 - giscus comments
 - neodb.social collections
+- Friend links page at `/friends`, edited in Decap CMS
 - Git-backed private content repo through Nuxt Content
 - Decap CMS at `/admin`
 - S3-compatible image/video uploads with multipart upload support
@@ -157,6 +158,8 @@ Expected content repo shape:
 ```text
 categories/
   Technology.md
+links/
+  friends.md
 posts/
   Technology/
     2026-05-23-example.md
@@ -184,6 +187,22 @@ Your content goes here.
 ```
 
 Set `status: draft` to keep an article out of listings and direct article responses. Set `status: private` to hide an article behind the article password, or `status: public` to publish it.
+
+Friend links shown at `/friends` are read from `links/friends.md`. Edit them in `/admin` under **Friend Links**, or write the frontmatter directly:
+
+```md
+---
+title: Friends
+description: Optional introduction shown above the list.
+links:
+  - name: Example Blog
+    url: https://example.com
+    description: Short note about the site
+    avatar: https://example.com/avatar.png
+---
+```
+
+`title` is optional and falls back to the localized menu title. Links without a name or an `http(s)` URL are skipped, and an avatar that is not an `http(s)` URL is ignored. Include `links/**` in the content repo workflow's `paths` so saving friend links also refreshes the running site.
 
 Generated translations are read from `translations/**/*.md`. Configure visible/generated languages with:
 

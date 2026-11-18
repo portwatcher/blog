@@ -16,6 +16,7 @@ const mediaAssetSchema = z.object({
 
 const articleSource = {
   include: process.env.BLOG_CONTENT_LOCAL_INCLUDE || '**/*.md',
+  exclude: ['links/**'],
   prefix: '/',
 }
 const translationSource = {

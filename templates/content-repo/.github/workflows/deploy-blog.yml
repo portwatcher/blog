@@ -7,6 +7,7 @@ on:
     paths:
       - posts/**
       - categories/**
+      - links/**
       - media/**
       - scripts/translate-posts.mjs
       - .github/workflows/deploy-blog.yml

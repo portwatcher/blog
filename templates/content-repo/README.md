@@ -21,6 +21,8 @@ If this repository was created directly from a GitHub template, configure the re
 ```text
 categories/
   General.md
+links/
+  friends.md          # friend links page, edited in Decap under Friend Links
 posts/
   General/
     welcome.md
