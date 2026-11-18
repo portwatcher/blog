@@ -1,19 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { paintArchiveLabel } from '../lib/archive-scene-assets.ts'
+import { coverTitleWidth, paintArchiveLabel } from '../lib/archive-scene-assets.ts'
 import { createArchiveBookStyles } from '../lib/archive-scene-books.ts'
 
-const renderTitle = (title, variant) => {
+const renderTitle = (title, alignment) => {
   const drawn = []
-  const context = {
+  // Every drawing call is accepted; only the title's text is recorded.
+  const context = new Proxy({
     font: '',
-    fillRect() {},
-    strokeRect() {},
-    beginPath() {},
-    moveTo() {},
-    lineTo() {},
-    stroke() {},
-    createLinearGradient: () => ({ addColorStop() {} }),
     // An independent proportional ruler: Latin glyphs are narrower than CJK.
     measureText(text) {
       const size = Number(this.font.match(/([\d.]+)px/)[1])
@@ -26,18 +20,20 @@ const renderTitle = (title, variant) => {
         drawn.push({ text, width: this.measureText(text).width })
       }
     },
-  }
+  }, {
+    get: (target, property, receiver) =>
+      property in target ? Reflect.get(target, property, receiver) : () => {},
+  })
   const article = { title, date: '2024-05-18', categoryTitle: 'Technology' }
-  const style = { ...createArchiveBookStyles([article])[0], variant }
+  const [style] = createArchiveBookStyles([article])
   const label = {
-    context, logicalWidth: 380, logicalHeight: 560,
-    paintKey: '', texture: {},
+    context, logicalWidth: 394, logicalHeight: 576, paintKey: '',
   }
-  paintArchiveLabel(label, article, 0, 'zh', 'serif', 26, 'center', style)
+  paintArchiveLabel(label, article, 0, 'zh', 'serif', 26, alignment, style)
   return drawn
 }
 
-test('cover titles keep English words whole in mixed CJK text and within every cover layout', () => {
+test('cover titles keep English words whole in mixed CJK text in either alignment', () => {
   const cases = [
     ['在Kubernetes中部署Perforce服务器', ['Kubernetes', 'Perforce']],
     ['在 Kubernetes 中部署Perforce服务器', ['Kubernetes', 'Perforce']],
@@ -47,29 +43,29 @@ test('cover titles keep English words whole in mixed CJK text and within every c
     ['纯中文标题也应该继续正常换行', []],
   ]
   for (const [title, words] of cases) {
-    for (let variant = 0; variant < 5; variant++) {
-      const drawn = renderTitle(title, variant)
+    for (const alignment of ['left', 'center']) {
+      const drawn = renderTitle(title, alignment)
       const lines = drawn.map(({ text }) => text)
       for (const word of words) {
         assert.ok(lines.some((line) => line.includes(word)), `${word} split in ${JSON.stringify(lines)}`)
       }
       assert.equal(lines.join('').replace(/\s/g, ''), title.replace(/\s/g, ''))
-      assert.ok(drawn.every(({ width }) => width <= (variant === 1 ? 274 : 304) + 0.01))
+      assert.ok(drawn.every(({ width }) => width <= coverTitleWidth + 0.01))
     }
   }
 })
 
 test('a clamped cover title ends with an ellipsis without leaving a partial English word', () => {
   const title = '在Kubernetes中部署Perforce服务器'.repeat(20)
-  for (let variant = 0; variant < 5; variant++) {
-    const drawn = renderTitle(title, variant)
+  for (const alignment of ['left', 'center']) {
+    const drawn = renderTitle(title, alignment)
     assert.equal(drawn.length, 6)
     assert.ok(drawn.at(-1).text.endsWith('…'))
     for (const { text, width } of drawn) {
       for (const word of text.match(/[A-Za-z]+/g) || []) {
         assert.ok(['Kubernetes', 'Perforce'].includes(word), `Partial word: ${word}`)
       }
-      assert.ok(width <= (variant === 1 ? 274 : 304) + 0.01)
+      assert.ok(width <= coverTitleWidth + 0.01)
     }
   }
 })

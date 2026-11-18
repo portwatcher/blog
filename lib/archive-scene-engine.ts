@@ -1,367 +1,123 @@
-import {
-  AmbientLight,
-  BufferGeometry,
-  Color,
-  DirectionalLight,
-  HemisphereLight,
-  Matrix4,
-  Mesh,
-  MeshBasicMaterial,
-  MeshStandardMaterial,
-  Object3D,
-  PerspectiveCamera,
-  PlaneGeometry,
-  Scene,
-  SRGBColorSpace,
-  WebGLRenderer,
-} from 'three'
-import {
-  createArchiveLabel,
-  createSpineAtlas,
-  createYearLabelTexture,
-  paintArchiveLabel,
-  paintSpineAtlas,
-} from './archive-scene-assets'
-import type { ArchiveLabel } from './archive-scene-assets'
+import { createBoxGeometry, createProgram } from './archive-gl'
+import { createMat4 } from './archive-math'
+import { createArchiveActiveBooks } from './archive-scene-active'
+import { createArchiveBookStyles } from './archive-scene-books'
 import {
   caseDepth,
+  caseHeight,
   caseWidth,
-  clamp,
-  labelHeight,
-  labelWidth,
-  shelfY,
-  shelfZ,
-  yearLabelHeight,
-  yearLabelWidth,
-  yearLabelX,
-  yearLabelYOffset,
+  mix,
 } from './archive-scene-constants'
-import { createArchiveBookModel, createArchiveBookStyles } from './archive-scene-books'
 import { createArchiveSceneInteraction } from './archive-scene-interaction'
 import { createArchiveSceneLayout } from './archive-scene-layout'
 import { createArchiveSceneMotion } from './archive-scene-motion'
-import { createArchiveActiveSpine } from './archive-scene-spines'
+import {
+  bookFragmentShader,
+  bookVertexShader,
+  glowFragmentShader,
+  glowVertexShader,
+} from './archive-scene-shaders'
 import { createArchiveShelves } from './archive-scene-shelves'
-import type { ArchiveActiveSpine } from './archive-scene-spines'
+import { createArchiveStage } from './archive-scene-stage'
 import type {
+  ArchiveCamera,
   ArchiveSceneEngine,
   ArchiveSceneFrame,
   ArchiveSceneOptions,
 } from './archive-scene-types'
 import { resizeArchiveSceneViewport } from './archive-scene-viewport'
 
+// The row keeps a little air even with nothing selected and steps back behind
+// the paper-white of the page once a cover is open in front of it.
+const restingHaze = 0.05
+const focusedHaze = 0.46
+const hazeLead = 0.9
+// From the reader's upper left, as the page is usually lit in print.
+const light = [-0.447, 0.596, 0.667]
+const lineWidth = 1.1
+// A device that cannot hold this frame time is given fewer pixels to fill.
+const slowFrameSeconds = 0.024
+const slowFramesAllowed = 8
+
+const rgb = (color: number) =>
+  [(color >> 16 & 255) / 255, (color >> 8 & 255) / 255, (color & 255) / 255] as const
+
 export const createArchiveScene = (
   options: ArchiveSceneOptions,
 ): ArchiveSceneEngine => {
   const {
     canvas,
-    context,
+    context: gl,
     host,
     articles,
     lowPower,
     locale,
-    titleFontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   } = options
-  const renderer = new WebGLRenderer({
-    canvas,
-    context,
-    alpha: false,
-    antialias: true,
-    depth: true,
-    stencil: false,
-    preserveDrawingBuffer: false,
-    powerPreference: 'low-power',
-    // Half-precision UVs quantize high-resolution glyph textures on mobile GPUs.
-    precision: 'highp',
-  })
-  renderer.outputColorSpace = SRGBColorSpace
+  let fontFamily = options.titleFontFamily
+    ?? '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+  const titleFontFamily = () => fontFamily
+  const background = rgb(options.backgroundColor ?? 0xfbfcfd)
+  const ink = rgb(options.theme?.heading ?? 0x14171a)
 
-  const scene = new Scene()
-  const background = new Color(options.backgroundColor ?? 0xfbfcfd)
-  scene.background = background
+  const bookProgram = createProgram(gl, bookVertexShader, bookFragmentShader)
+  const glowProgram = createProgram(gl, glowVertexShader, glowFragmentShader)
+  const box = createBoxGeometry(gl)
+  const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number
+  const filter = gl.getExtension('EXT_texture_filter_anisotropic')
+  const anisotropy = filter
+    ? Math.min(lowPower ? 4 : 8, gl.getParameter(filter.MAX_TEXTURE_MAX_ANISOTROPY_EXT) as number)
+    : 1
 
-  // A restrained perspective keeps the card readable while the moving camera
-  // and physical extraction path provide the depth cues.
-  const camera = new PerspectiveCamera(40, 1, 0.1, 64)
-  // Keep the pale stock dimensional without clipping it to flat white. These
-  // restrained lights also avoid the cost of shadows on low-end GPUs.
-  const ambient = new AmbientLight(0xffffff, 0.68)
-  const hemisphere = new HemisphereLight(0xffffff, 0xdadee3, 0.9)
-  const keyLight = new DirectionalLight(0xffffff, 1.55)
-  keyLight.position.set(-4.5, 6, 7)
-  const fillLight = new DirectionalLight(0xe8ebef, 0.38)
-  fillLight.position.set(5, -1.5, 4)
-  scene.add(
-    ambient,
-    hemisphere,
-    keyLight,
-    keyLight.target,
-    fillLight,
-    fillLight.target,
-  )
-
-  // Share the book model and materials across independently culled year rows.
-  const { geometry, material, texture: stockTexture, clothTexture } = createArchiveBookModel()
-  const bookStyles = createArchiveBookStyles(articles, options.theme)
-
-  // Extracted books stay outside the static rows so their animation remains
-  // visible even when the camera no longer intersects their resting slots.
-  const activeCases = [0, 1].map(() => {
-    const activeMaterial = material.clone()
-    activeMaterial.onBeforeCompile = material.onBeforeCompile
-    activeMaterial.customProgramCacheKey = material.customProgramCacheKey
-    const mesh = new Mesh(geometry, activeMaterial)
-    mesh.matrixAutoUpdate = false
-    mesh.visible = false
-    mesh.frustumCulled = false
-    scene.add(mesh)
-    return mesh
-  })
-
-  const labelGeometry = new PlaneGeometry(labelWidth, labelHeight)
-  const labels = [0, 1].map(() => createArchiveLabel(lowPower, renderer.capabilities.maxTextureSize))
-  const labelMeshes = labels.map((label) => {
-    const labelMaterial = new MeshStandardMaterial({
-      map: label.texture,
-      bumpMap: clothTexture,
-      bumpScale: 0.012,
-      color: 0xffffff,
-      roughness: 0.86,
-      metalness: 0,
-    })
-    const mesh = new Mesh(labelGeometry, labelMaterial)
-    mesh.matrixAutoUpdate = false
-    mesh.visible = false
-    mesh.frustumCulled = false
-    scene.add(mesh)
-    return mesh
-  })
-
-  // One atlas keeps every title resident while still uploading only a single
-  // texture. The shelf labels are batched below, so article count does not
-  // become article-count draw calls.
-  const spineAtlas = createSpineAtlas(articles.length, lowPower, renderer.capabilities.maxTextureSize)
-  paintSpineAtlas(spineAtlas, articles, titleFontFamily, bookStyles)
-  const textureAnisotropy = Math.max(
-    1,
-    Math.min(
-      lowPower ? 4 : 8,
-      renderer.capabilities.getMaxAnisotropy(),
-    ),
-  )
-  labels.forEach((label) => {
-    label.texture.anisotropy = textureAnisotropy
-  })
-  spineAtlas.texture.anisotropy = textureAnisotropy
-  stockTexture.anisotropy = textureAnisotropy
-  clothTexture.anisotropy = textureAnisotropy
-  const spineLabelMaterial = new MeshStandardMaterial({
-    map: spineAtlas.texture,
-    color: 0xffffff,
-    roughness: 0.84,
-    metalness: 0,
-  })
-
-  const labelOffset = new Matrix4().makeTranslation(
-    0,
-    0,
-    caseDepth / 2 + 0.008,
-  )
-  const spineLabelOffsetObject = new Object3D()
-  spineLabelOffsetObject.position.set(-caseWidth / 2 - 0.009, 0, 0)
-  spineLabelOffsetObject.rotation.y = -Math.PI / 2
-  spineLabelOffsetObject.updateMatrix()
-  const spineLabelOffset = spineLabelOffsetObject.matrix.clone()
   const layout = createArchiveSceneLayout(articles)
-  const {
-    shelfCenterYPositions,
-    shelfGroups,
-  } = layout
+  const styles = createArchiveBookStyles(articles)
+  // A restrained perspective keeps the cover readable while the moving camera
+  // and the book's path out of the row provide the depth cues.
+  const camera: ArchiveCamera = {
+    fieldOfView: 40 * Math.PI / 180,
+    aspect: 1,
+    position: [0, 0, 0],
+    view: createMat4(),
+    projection: createMat4(),
+    viewProjection: createMat4(),
+  }
+  const motion = createArchiveSceneMotion({ camera, layout })
   const shelves = createArchiveShelves({
-    geometry,
-    material,
-    layout,
-    styles: bookStyles,
-    spineLabelOffset,
-    spineRects: spineAtlas.rects,
-    spineMaterial: spineLabelMaterial,
+    gl, box, layout, articles, styles, lowPower, maxTextureSize, anisotropy, titleFontFamily,
   })
-  shelves.batches.forEach(({ group }) => scene.add(group))
+  const active = createArchiveActiveBooks({
+    gl, box, shelves, motion, articles, styles, lowPower, maxTextureSize, anisotropy,
+    locale, titleFontFamily,
+  })
+  const stage = createArchiveStage({ gl, box, layout, anisotropy, titleFontFamily })
 
-  const yearLabelGeometry = new PlaneGeometry(
-    yearLabelWidth,
-    yearLabelHeight,
-  )
-  const yearLabels = shelfGroups.map((shelf, shelfIndex) => {
-    const texture = createYearLabelTexture(shelf.year, titleFontFamily)
-    texture.anisotropy = textureAnisotropy
-    const yearMaterial = new MeshBasicMaterial({
-      map: texture,
-      transparent: true,
-      depthWrite: false,
-    })
-    const mesh = new Mesh(yearLabelGeometry, yearMaterial)
-    mesh.position.set(
-      yearLabelX,
-      (shelfCenterYPositions[shelfIndex] ?? shelfY) + yearLabelYOffset,
-      shelfZ + 0.2,
-    )
-    scene.add(mesh)
-    return { material: yearMaterial, texture }
-  })
-
-  const activeSpines = [0, 1].map(() => {
-    const spine = createArchiveActiveSpine({
-      articles, styles: bookStyles, titleFontFamily, lowPower,
-      maxTextureSize: renderer.capabilities.maxTextureSize,
-      anisotropy: textureAnisotropy,
-    })
-    scene.add(spine.mesh)
-    return spine
-  })
-  const motion = createArchiveSceneMotion({
-    camera,
-    fillLight,
-    keyLight,
-    layout,
-  })
   let currentFrame: ArchiveSceneFrame = {
-    position: -0.5,
+    position: 0,
+    presence: 0,
+    speed: 0,
     selectedIndex: null,
     firstIndex: 0,
     lastIndex: articles.length - 1,
-    deltaSeconds: 1,
+    deltaSeconds: 0,
     selectionProgress: 0,
     hovered: false,
   }
   let width = 1
   let height = 1
-  let cardTitleFontSize = 27
-  let cardTitleAlignment: 'left' | 'center' = 'center'
+  let pixelRatio = 1
+  let quality = 1
+  let slowFrames = 0
+  let warming = 0
+  let destroyed = false
 
-  const setLabelMatrix = (
-    mesh: Mesh,
-    label: ArchiveLabel,
-    articleIndex: number,
-    frame: ArchiveSceneFrame,
-  ) => {
-    const article = articles[articleIndex]
-    if (!article) {
-      mesh.visible = false
-      return
-    }
+  gl.enable(gl.DEPTH_TEST)
+  gl.depthFunc(gl.LEQUAL)
+  gl.enable(gl.CULL_FACE)
+  gl.clearColor(background[0], background[1], background[2], 1)
 
-    const pose = motion.getPose(articleIndex, frame)
-    if (pose.faceVisibility < 0.025 && frame.selectionProgress === 0) {
-      mesh.visible = false
-      return
-    }
-
-    paintArchiveLabel(
-      label,
-      article,
-      articleIndex,
-      locale,
-      titleFontFamily,
-      cardTitleFontSize,
-      cardTitleAlignment,
-      bookStyles[articleIndex],
-    )
-    mesh.matrix.copy(pose.matrix).multiply(labelOffset)
-    mesh.visible = true
-  }
-
-  const setActiveSpineLabel = (
-    spine: ArchiveActiveSpine,
-    articleIndex: number,
-    frame: ArchiveSceneFrame,
-  ) => {
-    const { mesh } = spine
-    if (articleIndex < 0 || articleIndex >= articles.length) {
-      mesh.visible = false
-      return
-    }
-
-    spine.setArticle(articleIndex)
-    const pose = motion.getPose(articleIndex, frame)
-    mesh.matrix.copy(pose.matrix).multiply(spineLabelOffset)
-    mesh.visible = true
-  }
-
-  const setActiveCase = (
-    mesh: Mesh<BufferGeometry, MeshStandardMaterial>,
-    articleIndex: number,
-    frame: ArchiveSceneFrame,
-  ) => {
-    if (articleIndex < 0 || articleIndex >= articles.length) {
-      mesh.visible = false
-      mesh.userData.articleIndex = -1
-      return
-    }
-
-    const pose = motion.getPose(articleIndex, frame)
-    mesh.matrix.copy(pose.matrix)
-    mesh.material.color.copy(bookStyles[articleIndex].color)
-    mesh.userData.articleIndex = articleIndex
-    mesh.visible = true
-  }
-
-  const setActiveLabels = (
-    lower: number,
-    upper: number,
-    frame: ArchiveSceneFrame,
-  ) => {
-    const lowerSlot = labels[0].articleIndex === lower
-      ? 0
-      : labels[1].articleIndex === lower
-        ? 1
-        : 0
-
-    if (upper === lower) {
-      const hiddenSlot = lowerSlot === 0 ? 1 : 0
-      setLabelMatrix(labelMeshes[lowerSlot], labels[lowerSlot], lower, frame)
-      labelMeshes[hiddenSlot].visible = false
-      return
-    }
-
-    let upperSlot = labels[0].articleIndex === upper
-      ? 0
-      : labels[1].articleIndex === upper
-        ? 1
-        : lowerSlot === 0 ? 1 : 0
-    if (upperSlot === lowerSlot) {
-      upperSlot = lowerSlot === 0 ? 1 : 0
-    }
-
-    setLabelMatrix(labelMeshes[lowerSlot], labels[lowerSlot], lower, frame)
-    setLabelMatrix(labelMeshes[upperSlot], labels[upperSlot], upper, frame)
-  }
-
-  const setActiveSpineLabels = (
-    lower: number,
-    upper: number,
-    frame: ArchiveSceneFrame,
-  ) => {
-    setActiveSpineLabel(
-      activeSpines[0],
-      lower,
-      frame,
-    )
-    if (upper === lower) {
-      activeSpines[1].mesh.visible = false
-    } else {
-      setActiveSpineLabel(
-        activeSpines[1],
-        upper,
-        frame,
-      )
-    }
-  }
-
-  const resize = () => {
+  const resize = (force = false) => {
     const nextWidth = Math.max(1, Math.round(host.clientWidth))
     const nextHeight = Math.max(1, Math.round(host.clientHeight))
-    if (nextWidth === width && nextHeight === height) {
+    if (!force && nextWidth === width && nextHeight === height) {
       return
     }
 
@@ -369,96 +125,151 @@ export const createArchiveScene = (
     height = nextHeight
     const viewport = resizeArchiveSceneViewport({
       camera,
+      canvas,
       height,
       lowPower,
-      renderer,
+      quality,
       width,
     })
-    cardTitleFontSize = viewport.cardTitleFontSize
-    cardTitleAlignment = viewport.cardTitleAlignment
+    pixelRatio = viewport.pixelRatio
+    active.setTypography(viewport.cardTitleFontSize, viewport.cardTitleAlignment)
     motion.setCameraDistance(viewport.cameraDistance)
-    motion.updateCamera(currentFrame)
+    motion.update({ ...currentFrame, deltaSeconds: 0 })
+  }
+
+  // Rows that have not been seen yet are painted one at a time while the
+  // browser is idle, so changing year does not wait on a canvas.
+  const warm = () => {
+    if (warming || destroyed) {
+      return
+    }
+    const run = () => {
+      warming = 0
+      if (!destroyed && shelves.warm()) {
+        warm()
+      }
+    }
+    // Safari has no idle callback; a short timer is close enough.
+    const idle: typeof window.requestIdleCallback | undefined = window.requestIdleCallback
+    warming = idle ? idle(run, { timeout: 2000 }) : window.setTimeout(run, 300)
+  }
+
+  const render = (frame: ArchiveSceneFrame) => {
+    const artwork = active.sync(frame)
+    shelves.syncActiveArticles(active.indices)
+    shelves.updateVisibility(camera.viewProjection)
+    // The book nearest the browsing position is the one in front.
+    const lead = active.indices.length
+      ? active.indices.reduce((nearest, index) =>
+        Math.abs(frame.position - index) < Math.abs(frame.position - nearest) ? index : nearest)
+      : null
+    const pose = lead !== null ? motion.getPose(lead, frame) : null
+    const swing = pose?.swing ?? 0
+    const hazeNear = motion.shelfDepth - hazeLead
+
+    gl.viewport(0, 0, canvas.width, canvas.height)
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+    gl.useProgram(bookProgram.program)
+    gl.uniformMatrix4fv(bookProgram.uniform('uViewProjection'), false, camera.viewProjection)
+    gl.uniform3f(bookProgram.uniform('uLight'), light[0], light[1], light[2])
+    gl.uniform3f(bookProgram.uniform('uPaper'), 1, 1, 1)
+    gl.uniform3f(bookProgram.uniform('uInk'), ink[0], ink[1], ink[2])
+    gl.uniform3f(bookProgram.uniform('uBackground'), background[0], background[1], background[2])
+    gl.uniform3f(
+      bookProgram.uniform('uHaze'),
+      hazeNear,
+      mix(restingHaze, focusedHaze, swing) / hazeLead,
+      motion.shelfDepth,
+    )
+    gl.uniform1f(bookProgram.uniform('uLine'), lineWidth * pixelRatio)
+    gl.uniform1i(bookProgram.uniform('uSpine'), 0)
+    gl.uniform1i(bookProgram.uniform('uCover'), 1)
+    gl.uniform1i(bookProgram.uniform('uKind'), 0)
+    gl.uniform3f(bookProgram.uniform('uSize'), caseWidth, caseHeight, caseDepth)
+    const painted = shelves.draw(box.indexCount) || artwork.painted
+    stage.drawFurniture(bookProgram, box.indexCount)
+
+    gl.useProgram(glowProgram.program)
+    gl.uniformMatrix4fv(glowProgram.uniform('uViewProjection'), false, camera.viewProjection)
+    gl.uniform3f(glowProgram.uniform('uBackground'), background[0], background[1], background[2])
+    stage.drawGlow(glowProgram, pose)
+
+    gl.useProgram(bookProgram.program)
+    gl.uniform1i(bookProgram.uniform('uKind'), 0)
+    gl.uniform3f(bookProgram.uniform('uSize'), caseWidth, caseHeight, caseDepth)
+    active.draw(frame, box.indexCount)
+    gl.bindVertexArray(null)
+    return { painted, pending: artwork.pending }
+  }
+
+  // Frames that keep arriving late mean the GPU cannot fill this many pixels.
+  // Text gets a little softer; the motion stays smooth, which matters more.
+  const adapt = (seconds: number, painted: boolean) => {
+    if (painted || seconds === 0) {
+      return
+    }
+    slowFrames = seconds > slowFrameSeconds ? slowFrames + 1 : Math.max(0, slowFrames - 2)
+    if (slowFrames >= slowFramesAllowed && quality > 0.5) {
+      quality *= 0.8
+      slowFrames = 0
+      resize(true)
+    }
   }
 
   const draw = (frame: ArchiveSceneFrame) => {
     currentFrame = frame
-    const cameraMoving = motion.updateCamera(frame)
-    const lower = clamp(Math.floor(frame.position), frame.firstIndex, frame.lastIndex)
-    const upper = clamp(Math.ceil(frame.position), frame.firstIndex, frame.lastIndex)
-    const secondIndex = upper === lower ? -1 : upper
-    shelves.syncActiveArticles(lower, secondIndex)
-    shelves.updateVisibility(camera)
-    setActiveCase(activeCases[0], lower, frame)
-    setActiveCase(activeCases[1], secondIndex, frame)
-    setActiveSpineLabels(lower, upper, frame)
-    setActiveLabels(lower, upper, frame)
-    renderer.render(scene, camera)
-    return cameraMoving
+    const moving = motion.update(frame)
+    const { painted, pending } = render(frame)
+    adapt(frame.deltaSeconds, painted)
+    if (!moving && !pending) {
+      warm()
+    }
+    return moving || pending
   }
 
   const interaction = createArchiveSceneInteraction({
-    activeCases,
     camera,
-    shelves: shelves.batches,
+    shelves,
+    layout,
+    getActive: () => active.indices,
     getFrame: () => currentFrame,
     getSize: () => ({ width, height }),
     host,
-    labels,
+    labelFor: active.labelFor,
     motion,
   })
 
-  resize()
+  resize(true)
   draw(currentFrame)
 
   return {
     draw,
     getActiveRects: interaction.getActiveRects,
     pickArticleAt: interaction.pickArticleAt,
-    refreshTypography() {
-      labels.forEach((label) => {
-        label.paintKey = ''
-      })
-      spineAtlas.paintKey = ''
-      paintSpineAtlas(spineAtlas, articles, titleFontFamily, bookStyles)
-      activeSpines.forEach((spine) => spine.refreshTypography())
+    place() {
+      motion.snap()
+    },
+    refreshTypography(nextFontFamily?: string) {
+      fontFamily = nextFontFamily || fontFamily
+      shelves.refreshTypography()
+      active.refreshTypography()
+      stage.refreshTypography()
     },
     resize() {
-      width = 0
-      height = 0
-      resize()
+      resize(true)
     },
     destroy() {
-      geometry.dispose()
-      material.dispose()
-      stockTexture.dispose()
-      clothTexture.dispose()
-      activeCases.forEach((mesh) => mesh.material.dispose())
-      labelGeometry.dispose()
+      destroyed = true
+      const cancelIdle: typeof window.cancelIdleCallback | undefined = window.cancelIdleCallback
+      cancelIdle?.(warming)
+      window.clearTimeout(warming)
       shelves.destroy()
-      yearLabelGeometry.dispose()
-      yearLabels.forEach(({ material: yearMaterial, texture }) => {
-        yearMaterial.dispose()
-        texture.dispose()
-      })
-      activeSpines.forEach((spine) => spine.destroy())
-      labels.forEach((label) => {
-        label.texture.dispose()
-      })
-      spineAtlas.texture.dispose()
-      spineLabelMaterial.dispose()
-      labelMeshes.forEach((mesh) => {
-        const meshMaterial = mesh.material
-        if (Array.isArray(meshMaterial)) {
-          meshMaterial.forEach((item) => {
-            item.dispose()
-          })
-        } else {
-          meshMaterial.dispose()
-        }
-      })
-      scene.clear()
-      renderer.dispose()
-      context.getExtension('WEBGL_lose_context')?.loseContext()
+      active.destroy()
+      stage.destroy()
+      box.destroy()
+      bookProgram.destroy()
+      glowProgram.destroy()
+      gl.getExtension('WEBGL_lose_context')?.loseContext()
     },
   }
 }

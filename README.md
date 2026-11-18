@@ -45,43 +45,74 @@ The app can run against local Markdown under `content/`, but production-style us
 
 ## Archive 3D Interaction
 
-The archive opens in 3D by default, with no book selected. The view switch or
-`/archive?view=list` opens the list. Drag horizontally or vertically,
-use a touch swipe, or scroll to browse continuously. Movement slows near each book;
-keep moving to put it back and pass to the next one. Releasing a drag or finishing
-a scroll smoothly snaps to the nearer book, using the midpoint between adjacent
-books as the threshold in either direction. A release never flings past that
-chosen book. New input can interrupt settling immediately. The initial view and
-Escape still allow every book to remain unselected. While browsing a year shelf, the camera pans
-horizontally with a fixed height and viewing direction, independent of book
-extraction. Only changing the year moves the camera to another shelf height.
+The archive opens in 3D by default and, after a beat, brings the newest book out.
+The view switch or `/archive?view=list` opens the list.
 
-Extraction unfolds over a longer gesture, with immediate input response. Books
-share a rounded hardback model with recessed ivory page edges, even on dark
-covers. Five seeded paper and bookcloth stocks range from warm ivory and blue-grey
-to charcoal, with matching spine numbers, pressed hinges, paper title labels and
-restrained cover frames. A shared cloth relief texture catches the light, while
-paper grain and stable differences in thickness make
-the books distinct while retaining the site's typography and quiet palette.
-Each cover's top line shows its category title from `categories/` (falling back to
+Browsing is modelled on flipping through cases on a shelf. One number, the
+browsing position, drives everything: the camera follows it and each book's pose
+is a pure function of how far the position is from that book. Passing a book
+therefore always plays its whole movement: straight out of the row, open from the
+spine, shut, back in. Neighbouring books overlap, so the outgoing one is still
+going back while the incoming one is already on its way out.
+
+Under a pointer the position stays glued to the hand, so the movement is not a
+canned animation: a book can be drawn part-way out, held there, and pushed back
+by moving the other way. One book is about 240 pixels of mouse travel (a little
+more of the screen for a finger). Letting go settles on the book nearest where
+the hand left it, so a book drawn less than half-way simply goes back; a release
+that is still moving carries on to the neighbour and no further. A wheel or
+trackpad scrubs the row the same way, in either direction, but one push can only
+carry it as far as the neighbouring book: inertia may finish a flip, never start
+another, and a single notch of a wheel is one flip. A press has no hand to
+follow, so arrow keys, A / D and the on-screen arrows play an eased flip of about
+a fifth of a second, and several presses queue up. Everything shares a speed
+limit that eases off as each book passes fully open, so however fast the input,
+every book on the way is brought out and put back.
+A vertical swipe changes year, the ends of a shelf give a little and spring back,
+and a held key keeps pace with the flips rather than running ahead of them.
+While browsing a year shelf, the camera pans horizontally with a fixed height and
+viewing direction. Only changing the year glides the camera to another shelf
+height, and the remembered book of that shelf comes out as the camera arrives.
+Escape puts the book back and leaves the shelf unselected.
+
+The look is black-and-white print manga. Every pixel is paper or ink: books are
+drawn with an ink outline that is heavier on what is nearer, faces turned from
+the light are ruled with fine parallel lines, and page edges are hatched. A cover is a
+manga panel with a ruled frame, a caption box naming the category, the title
+alone in the middle, and a foot strip with the date. With no colour to
+spend, each category is marked by its own sheet of tone (dots, rules, hatching,
+checks) on the spine and the cover. Depth is carried by fading rather than
+shading: the row behind an open cover dissolves towards the paper, and a soft
+bloom of paper-white is laid behind the cover to lift it off the shelf.
+Each cover's caption shows its category title from `categories/` (falling back to
 the article's category when no category document exists), without a book counter.
-Long category titles are shortened to fit the cover.
+Long category titles are shortened to fit.
 Cover titles keep Latin words intact when wrapping, including words next to
 Chinese or Japanese text. Unusually long words reduce the title size to fit.
-Text uses higher-resolution
-canvas textures, trilinear mipmaps and anisotropic filtering alongside hardware
-MSAA. Texture and screen-pixel budgets stay bounded on lower-power devices; the
-shelf remains instanced and only two cover labels are kept in memory.
-Retina phones retain their native pixel density within a four-million-pixel
-framebuffer budget (two million on devices reporting at most 2 GB of memory).
-CPU core counts do not lower text resolution. High-precision texture coordinates
-and two reusable close-up spine textures keep extracted titles sharp without
-enlarging the shared shelf atlas.
 
-Books and spine labels are batched by year. Each row's bounding box is checked
+The scene is built to open quickly on slow connections and modest devices. It is
+drawn by a small purpose-built WebGL2 renderer instead of a general 3D library:
+about 15 kB of JavaScript gzipped (down from about 145 kB), shipped with the page
+so the shelf does not wait on a second request, with two short shaders to compile.
+Until it is ready the plain article list is shown. Each book is one instanced
+box; a year row is one draw call and one texture. Artwork is stored as one byte
+per pixel, a quarter of the memory and upload of a colour texture. Nothing is
+painted before it is needed: a row's spines when the row first comes into view
+(the rest while the browser is idle), a cover or a close-up spine when its book
+comes out, at most one upload per frame and none for a book passed at speed.
+Titles are drawn at once in whatever font is available and redrawn when a web
+font arrives. Lines and tone are antialiased in the shader, so multisampling is
+only requested on low-density screens. Retina phones keep their native pixel
+density within a four-million-pixel framebuffer budget (two million on devices
+reporting at most 2 GB of memory), and if frames keep arriving late the
+resolution steps down so the motion stays smooth. Rendering is on demand: nothing
+is drawn while the scene is still.
+
+Books and spine sheets are batched by year. Each row's bounding box is checked
 against the camera frustum before drawing, so rows outside the view do not submit
 their geometry to the GPU. Partially visible rows remain rendered during year
-changes, and extracted books animate independently of their resting row.
+changes, and the two books that can be out of the row at once are drawn apart
+from it.
 
 Click a spine to select it, then click the presented book to open the article.
 Arrow keys / A D select articles, Up / Down / W S change year shelves, and Escape

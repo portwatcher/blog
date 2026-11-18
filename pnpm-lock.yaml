@@ -56,9 +56,6 @@ importers:
       rss:
         specifier: ^1.2.2
         version: 1.2.2
-      three:
-        specifier: ^0.185.1
-        version: 0.185.1
       vue:
         specifier: ^3.5.34
         version: 3.5.34(typescript@5.6.3)
@@ -79,6 +76,9 @@ importers:
         specifier: ^0.0.32
         version: 0.0.32
       '@types/three':
+        specifier: ^0.185.1
+        version: 0.185.1
+      three:
         specifier: ^0.185.1
         version: 0.185.1
       typescript:

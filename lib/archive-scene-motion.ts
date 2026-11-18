@@ -1,46 +1,51 @@
 import {
-  Object3D,
-  Vector3,
-} from 'three'
-import type {
-  DirectionalLight,
-  PerspectiveCamera,
-} from 'three'
+  createMat4,
+  lerpVec3,
+  mat4Compose,
+  mat4LookAt,
+  mat4Multiply,
+  quatFacing,
+  quatFromEuler,
+  quatRotate,
+  quatSlerp,
+  setVec3,
+} from './archive-math'
+import type { Quat, Vec3 } from './archive-math'
+import { archiveDistance, archivePullAt, archiveSwingAt } from './archive-presentation'
 import {
   cameraDepthOffset,
   cameraY,
+  caseWidth,
   clamp,
   mix,
+  presentedLift,
+  presentedOffsetX,
+  pulledLift,
   pullDistance,
   shelfY,
   spinePitch,
   shelfZ,
   smootherstep,
-  turnStart,
 } from './archive-scene-constants'
-import { archivePresentationAt } from './archive-navigation'
 import type { ArchiveSceneLayout } from './archive-scene-layout'
 import type {
+  ArchiveCamera,
   ArchiveCasePose,
   ArchiveSceneFrame,
 } from './archive-scene-types'
 
 interface ArchiveSceneMotionOptions {
-  camera: PerspectiveCamera
-  fillLight: DirectionalLight
-  keyLight: DirectionalLight
+  camera: ArchiveCamera
   layout: ArchiveSceneLayout
 }
+
+const rigRate = 9.5
+const hoverRate = 16
 
 export const createArchiveSceneMotion = (
   options: ArchiveSceneMotionOptions,
 ) => {
-  const {
-    camera,
-    fillLight,
-    keyLight,
-    layout,
-  } = options
+  const { camera, layout } = options
   const {
     caseLeanAngles,
     caseScales,
@@ -50,71 +55,93 @@ export const createArchiveSceneMotion = (
     shelfXPositions,
     shelfYPositions,
   } = layout
-  const poseObject = new Object3D()
-  const shelfRotationObject = new Object3D()
-  const displayRotationObject = new Object3D()
-  const facingObject = new Object3D()
-  const cameraTarget = new Vector3()
-  const poseResult: ArchiveCasePose = {
-    matrix: poseObject.matrix,
-    faceVisibility: 0,
-  }
+  const shelfRotation: Quat = [0, 0, 0, 1]
+  const rotation: Quat = [0, 0, 0, 1]
+  const facing: Quat = [0, 0, 0, 1]
+  // Leaning back with its top towards the spine, like a tape tipped out of a
+  // row and held up to the light.
+  const shownRotation = quatFromEuler([0, 0, 0, 1], -0.2, 0.42, 0.13, 'XYZ')
+  const cameraTarget: Vec3 = [0, 0, 0]
+  const hinge: Vec3 = [0, 0, 0]
+  const pulledHinge: Vec3 = [0, 0, 0]
+  const shownHinge: Vec3 = [0, 0, 0]
+  const spineOffset: Vec3 = [0, 0, 0]
+  const center: Vec3 = [0, 0, 0]
+  const scale: Vec3 = [1, 1, 1]
+  const pose: ArchiveCasePose = { matrix: createMat4(), swing: 0, center }
   let cameraDistance = 10
+  let rigShelf = -1
+  let rigX = 0
+  let rigY = 0
+  let rigOffsetX = 0
+  let rigOffsetY = 0
+  let rigVelocityX = 0
+  let rigVelocityY = 0
+  let hover = 0
 
-  displayRotationObject.rotation.set(-0.16, 0.4, -0.1, 'XYZ')
-
-  let smoothedX = 0
-  let smoothedShelfY = shelfY
-  let cameraInitialized = false
-
-  const presentationForIndex = (articleIndex: number, frame: ArchiveSceneFrame) =>
-    archivePresentationAt(frame.position, articleIndex)
-
-  const slideForPresentation = (presentation: number) =>
-    // Spread extraction across more of the approach, while leaving enough
-    // clearance before the cover turns past its neighbors.
-    smootherstep(0, 0.88, presentation)
+  const shelfXAt = (frame: ArchiveSceneFrame) => {
+    const position = clamp(frame.position, frame.firstIndex, frame.lastIndex)
+    const lower = Math.floor(position)
+    const upper = Math.min(frame.lastIndex, lower + 1)
+    // Past either end the rubber band keeps travelling at one book per unit.
+    return mix(shelfXPositions[lower], shelfXPositions[upper], position - lower)
+      + (frame.position - position) * spinePitch
+  }
 
   const updateCamera = (frame: ArchiveSceneFrame) => {
-    const lower = clamp(Math.floor(frame.position), frame.firstIndex, frame.lastIndex)
-    const upper = clamp(Math.ceil(frame.position), frame.firstIndex, frame.lastIndex)
-    const fraction = clamp(frame.position - lower, 0, 1)
-    const lowerPresentation = presentationForIndex(lower, frame)
-    const upperPresentation = presentationForIndex(upper, frame)
-    const presentation = Math.max(lowerPresentation, upperPresentation)
-    const turn = smootherstep(turnStart, 1, presentation)
-    // Linear shelf tracking has no stationary sections or handoff discontinuity.
-    const edgeOffset = (frame.position - clamp(
-      frame.position, frame.firstIndex, frame.lastIndex,
-    )) * spinePitch
-    const focusX = mix(shelfXPositions[lower], shelfXPositions[upper], fraction)
-      + edgeOffset - 0.1 * turn
-    const shelfCenter = shelfCenterYPositions[shelfIndexByArticle[frame.firstIndex]] ?? shelfY
-    const follow = cameraInitialized ? 1 - Math.exp(-26 * frame.deltaSeconds) : 1
-    smoothedX = mix(smoothedX, focusX, follow)
-    smoothedShelfY = mix(smoothedShelfY, shelfCenter, follow)
-    cameraInitialized = true
-    const moving = Math.abs(smoothedX - focusX) > 0.001
-      || Math.abs(smoothedShelfY - shelfCenter) > 0.001
-    if (!moving) {
-      smoothedX = focusX
-      smoothedShelfY = shelfCenter
+    const shelf = shelfIndexByArticle[frame.firstIndex] ?? 0
+    const idealX = shelfXAt(frame) + presentedOffsetX
+    const idealY = shelfCenterYPositions[shelf] ?? shelfY
+    if (rigShelf >= 0 && shelf !== rigShelf) {
+      // Changing year teleports the browsing position. Carry the camera's
+      // current place over as an offset and let it glide to the new shelf.
+      rigOffsetX += rigX - idealX
+      rigOffsetY += rigY - idealY
     }
-    // Track the shelf, not the rising/receding covers. A fixed look direction
-    // keeps stationary books vertically still during a horizontal pan. Only an
-    // explicit year change moves both camera and target to another shelf height.
-    camera.position.set(
-      smoothedX,
-      smoothedShelfY + (cameraY - shelfY),
-      shelfZ + cameraDistance + cameraDepthOffset,
-    )
-    cameraTarget.set(smoothedX, smoothedShelfY + 0.56, shelfZ + pullDistance)
-    camera.lookAt(cameraTarget)
-    keyLight.position.set(cameraTarget.x - 4.5, cameraTarget.y + 6, cameraTarget.z + 7)
-    keyLight.target.position.copy(cameraTarget)
-    fillLight.position.set(cameraTarget.x + 5, cameraTarget.y - 1.5, cameraTarget.z + 4)
-    fillLight.target.position.copy(cameraTarget)
+    rigShelf = shelf
+    rigX = idealX
+    rigY = idealY
+
+    const seconds = frame.deltaSeconds
+    const decay = Math.exp(-rigRate * seconds)
+    const carriedX = rigVelocityX + rigRate * rigOffsetX
+    const carriedY = rigVelocityY + rigRate * rigOffsetY
+    const nextX = (rigOffsetX + carriedX * seconds) * decay
+    const nextY = (rigOffsetY + carriedY * seconds) * decay
+    rigVelocityX = (carriedX - rigRate * (rigOffsetX + carriedX * seconds)) * decay
+    rigVelocityY = (carriedY - rigRate * (rigOffsetY + carriedY * seconds)) * decay
+    rigOffsetX = nextX
+    rigOffsetY = nextY
+    const moving = Math.hypot(rigOffsetX, rigOffsetY) > 0.0008
+      || Math.hypot(rigVelocityX, rigVelocityY) > 0.008
+    if (!moving) {
+      rigOffsetX = rigOffsetY = rigVelocityX = rigVelocityY = 0
+    }
+
+    // Track the shelf, not the rising covers. A fixed look direction keeps
+    // stationary books vertically still while the row pans; only an explicit
+    // year change moves both camera and target to another shelf height.
+    const x = idealX + rigOffsetX
+    const y = idealY + rigOffsetY
+    setVec3(camera.position, x, y + (cameraY - shelfY), shelfZ + cameraDistance + cameraDepthOffset)
+    setVec3(cameraTarget, x, y + presentedLift, shelfZ + pullDistance)
+    mat4LookAt(camera.view, camera.position, cameraTarget)
+    mat4Multiply(camera.viewProjection, camera.projection, camera.view)
     return moving
+  }
+
+  const updateHover = (frame: ArchiveSceneFrame) => {
+    const goal = frame.hovered
+      && frame.selectedIndex !== null
+      && frame.selectionProgress === 0
+      && archiveDistance(frame.position, frame.presence, frame.selectedIndex) < 0.03
+      ? 1
+      : 0
+    hover = goal + (hover - goal) * Math.exp(-hoverRate * frame.deltaSeconds)
+    if (Math.abs(hover - goal) < 0.002) {
+      hover = goal
+    }
+    return hover !== goal
   }
 
   const getPose = (
@@ -122,55 +149,57 @@ export const createArchiveSceneMotion = (
     frame: ArchiveSceneFrame,
   ): ArchiveCasePose => {
     const presented = articleIndex === frame.selectedIndex
-    const presentation = presentationForIndex(articleIndex, frame)
-    const slide = slideForPresentation(presentation)
-    const turn = smootherstep(turnStart, 1, presentation)
-    const lift = smootherstep(0.42, 1, presentation)
+    // A book cannot turn between its neighbours, so it first travels straight
+    // out (towards the camera, where the move reads as the spine growing) and
+    // only then swings open.
+    const distance = archiveDistance(frame.position, frame.presence, articleIndex)
+    const pull = archivePullAt(distance)
+    const swing = archiveSwingAt(distance)
     const selected = presented ? frame.selectionProgress : 0
     const align = smootherstep(0, 0.62, selected)
     const flatten = smootherstep(0.62, 1, selected)
-    const hover = presented
-      && frame.hovered
-      && presentation > 0.999
-      && selected === 0
-      ? 1
-      : 0
+    const lifted = presented ? hover : 0
     const caseScale = caseScales[articleIndex]
-    const scale = 1 + hover * 0.012
+    const grow = 1 + lifted * 0.012
+    const halfWidth = caseWidth * caseScale.x / 2
 
-    poseObject.position.set(
-      shelfXPositions[articleIndex] - 0.1 * turn,
-      shelfYPositions[articleIndex] + 0.56 * lift,
-      shelfZ + pullDistance * slide + hover * 0.1,
+    quatFromEuler(
+      shelfRotation, 0, Math.PI / 2 + caseYawAngles[articleIndex], caseLeanAngles[articleIndex], 'ZYX',
     )
-    shelfRotationObject.rotation.set(
-      0,
-      Math.PI / 2 + caseYawAngles[articleIndex],
-      caseLeanAngles[articleIndex],
-      'ZYX',
+    // Follow the spine edge, where a hand would hold the book: straight out of
+    // the row first, then across to where the opened cover is centred.
+    quatRotate(spineOffset, shelfRotation, setVec3(spineOffset, -halfWidth, 0, 0))
+    setVec3(
+      hinge,
+      shelfXPositions[articleIndex] + spineOffset[0],
+      shelfYPositions[articleIndex] + spineOffset[1],
+      shelfZ + spineOffset[2],
     )
-    poseObject.quaternion.slerpQuaternions(
-      shelfRotationObject.quaternion,
-      displayRotationObject.quaternion,
-      turn,
+    setVec3(pulledHinge, hinge[0], hinge[1] + pulledLift, hinge[2] + pullDistance)
+    quatRotate(spineOffset, shownRotation, setVec3(spineOffset, -halfWidth, 0, 0))
+    setVec3(
+      shownHinge,
+      shelfXPositions[articleIndex] + presentedOffsetX + spineOffset[0],
+      shelfYPositions[articleIndex] + presentedLift + spineOffset[1],
+      shelfZ + pullDistance + lifted * 0.1 + spineOffset[2],
     )
+    lerpVec3(hinge, hinge, pulledHinge, pull)
+    lerpVec3(hinge, hinge, shownHinge, swing)
+
+    quatSlerp(rotation, shelfRotation, shownRotation, swing)
+    quatRotate(spineOffset, rotation, setVec3(spineOffset, halfWidth, 0, 0))
+    setVec3(center, hinge[0] + spineOffset[0], hinge[1] + spineOffset[1], hinge[2] + spineOffset[2])
 
     if (align > 0) {
-      facingObject.position.copy(poseObject.position)
-      facingObject.lookAt(camera.position)
-      poseObject.quaternion.slerp(facingObject.quaternion, align)
+      // Opening an article turns the cover square to the reader.
+      quatFacing(facing, center, camera.position)
+      quatSlerp(rotation, rotation, facing, align)
     }
 
-    poseObject.scale.set(
-      caseScale.x * scale,
-      caseScale.y * scale,
-      mix(caseScale.z * scale, 0.045, flatten),
-    )
-    poseObject.updateMatrix()
-
-    poseResult.matrix = poseObject.matrix
-    poseResult.faceVisibility = Math.max(turn, align)
-    return poseResult
+    setVec3(scale, caseScale.x * grow, caseScale.y * grow, mix(caseScale.z * grow, 0.045, flatten))
+    mat4Compose(pose.matrix, center, rotation, scale)
+    pose.swing = swing
+    return pose
   }
 
   return {
@@ -178,7 +207,19 @@ export const createArchiveSceneMotion = (
     setCameraDistance(value: number) {
       cameraDistance = value
     },
-    updateCamera,
+    // Distance from the camera to the spines resting in the row.
+    get shelfDepth() {
+      return cameraDistance + cameraDepthOffset - caseWidth / 2
+    },
+    // Start the next frame on its shelf instead of gliding there.
+    snap() {
+      rigShelf = -1
+      rigOffsetX = rigOffsetY = rigVelocityX = rigVelocityY = 0
+    },
+    update(frame: ArchiveSceneFrame) {
+      const cameraMoving = updateCamera(frame)
+      return updateHover(frame) || cameraMoving
+    },
   }
 }
 

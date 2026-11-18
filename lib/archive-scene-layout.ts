@@ -1,4 +1,5 @@
-import { Object3D } from 'three'
+import { createMat4, mat4Compose, quatFromEuler } from './archive-math'
+import type { Quat, Vec3 } from './archive-math'
 import { archiveBookSeed } from './archive-scene-books'
 import {
   caseDepth,
@@ -82,25 +83,23 @@ export const createArchiveSceneLayout = (
     return shelfCenterY - caseHeight / 2 + leanedHalfHeight
   })
 
-  const poseObject = new Object3D()
+  const rotation: Quat = [0, 0, 0, 1]
+  const position: Vec3 = [0, 0, 0]
+  const scale: Vec3 = [1, 1, 1]
   const restMatrices = articles.map((_, articleIndex) => {
     const caseScale = caseScales[articleIndex]
-    poseObject.position.set(
-      shelfXPositions[articleIndex],
-      shelfYPositions[articleIndex],
-      shelfZ,
+    position[0] = shelfXPositions[articleIndex]
+    position[1] = shelfYPositions[articleIndex]
+    position[2] = shelfZ
+    // ZYX applies the lean in shelf space, so neighboring tops actually
+    // angle toward one another rather than merely rolling in depth.
+    quatFromEuler(
+      rotation, 0, Math.PI / 2 + caseYawAngles[articleIndex], caseLeanAngles[articleIndex], 'ZYX',
     )
-    poseObject.rotation.set(
-      0,
-      Math.PI / 2 + caseYawAngles[articleIndex],
-      caseLeanAngles[articleIndex],
-      // ZYX applies the lean in shelf space, so neighboring tops actually
-      // angle toward one another rather than merely rolling in depth.
-      'ZYX',
-    )
-    poseObject.scale.set(caseScale.x, caseScale.y, caseScale.z)
-    poseObject.updateMatrix()
-    return poseObject.matrix.clone()
+    scale[0] = caseScale.x
+    scale[1] = caseScale.y
+    scale[2] = caseScale.z
+    return mat4Compose(createMat4(), position, rotation, scale)
   })
 
   return {

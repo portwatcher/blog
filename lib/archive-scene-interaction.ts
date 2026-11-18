@@ -1,62 +1,84 @@
-import {
-  Raycaster,
-  Vector2,
-  Vector3,
-} from 'three'
-import type {
-  Matrix4,
-  Mesh,
-  Object3D,
-  PerspectiveCamera,
-} from 'three'
+import { createMat4, mat4Invert, mat4Multiply, transformDirection, transformPoint } from './archive-math'
+import type { Mat4, Vec3 } from './archive-math'
 import type { ArchiveLabel } from './archive-scene-assets'
 import {
   caseDepth,
   caseHeight,
   caseWidth,
-  labelHeight,
-  labelWidth,
 } from './archive-scene-constants'
+import type { ArchiveSceneLayout } from './archive-scene-layout'
 import type { ArchiveSceneMotion } from './archive-scene-motion'
-import type { ArchiveShelfBatch } from './archive-scene-shelves'
+import type { ArchiveShelves } from './archive-scene-shelves'
 import type {
+  ArchiveCamera,
   ArchiveSceneFrame,
   ArchiveSceneRects,
 } from './archive-scene-types'
 
 interface ArchiveSceneInteractionOptions {
-  activeCases: Mesh[]
-  camera: PerspectiveCamera
-  shelves: ArchiveShelfBatch[]
+  camera: ArchiveCamera
+  shelves: ArchiveShelves
+  layout: ArchiveSceneLayout
+  getActive: () => readonly number[]
   getFrame: () => ArchiveSceneFrame
   getSize: () => { width: number, height: number }
   host: HTMLElement
-  labels: ArchiveLabel[]
+  labelFor: (articleIndex: number) => ArchiveLabel | null
   motion: ArchiveSceneMotion
 }
+
+const half: Vec3 = [caseWidth / 2, caseHeight / 2, caseDepth / 2]
+
+// How far along a ray it enters a book, or Infinity if it misses. The ray is
+// taken into the book's own space, where the book is an axis-aligned box.
+export const rayHitsBook = (inverse: Mat4, model: Mat4, origin: Vec3, direction: Vec3) => {
+  if (!mat4Invert(inverse, model)) {
+    return Infinity
+  }
+  const [ox, oy, oz] = transformPoint(localOrigin, inverse, origin)
+  const [dx, dy, dz] = transformDirection(localDirection, inverse, direction)
+  let enter = 0
+  let exit = Infinity
+  for (const [start, step, extent] of [[ox, dx, half[0]], [oy, dy, half[1]], [oz, dz, half[2]]]) {
+    if (Math.abs(step) < 1e-9) {
+      if (Math.abs(start) > extent) {
+        return Infinity
+      }
+      continue
+    }
+    const a = (-extent - start) / step
+    const b = (extent - start) / step
+    enter = Math.max(enter, Math.min(a, b))
+    exit = Math.min(exit, Math.max(a, b))
+  }
+  return enter <= exit ? enter : Infinity
+}
+
+const localOrigin: Vec3 = [0, 0, 0]
+const localDirection: Vec3 = [0, 0, 0]
 
 export const createArchiveSceneInteraction = (
   options: ArchiveSceneInteractionOptions,
 ) => {
   const {
-    activeCases,
     camera,
     shelves,
+    layout,
+    getActive,
     getFrame,
     getSize,
     host,
-    labels,
+    labelFor,
     motion,
   } = options
-  const pickPoint = new Vector2()
-  const raycaster = new Raycaster()
-  const projectedPoint = new Vector3()
-  const shelfByMesh = new Map<Object3D, ArchiveShelfBatch>(
-    shelves.map((shelf) => [shelf.cases, shelf]),
-  )
+  const projected: Vec3 = [0, 0, 0]
+  const far: Vec3 = [0, 0, 0]
+  const direction: Vec3 = [0, 0, 0]
+  const inverse = createMat4()
+  const combined = createMat4()
 
   const projectBounds = (
-    matrix: Matrix4,
+    matrix: Mat4,
     minLocalX: number,
     maxLocalX: number,
     minLocalY: number,
@@ -70,19 +92,17 @@ export const createArchiveSceneInteraction = (
     let maxY = Number.NEGATIVE_INFINITY
     const zSteps = minLocalZ === maxLocalZ ? 1 : 2
     const { width, height } = getSize()
+    mat4Multiply(combined, camera.viewProjection, matrix)
 
     for (let xStep = 0; xStep < 2; xStep++) {
-      const localX = xStep === 0 ? minLocalX : maxLocalX
       for (let yStep = 0; yStep < 2; yStep++) {
-        const localY = yStep === 0 ? minLocalY : maxLocalY
         for (let zStep = 0; zStep < zSteps; zStep++) {
-          const localZ = zStep === 0 ? minLocalZ : maxLocalZ
-          projectedPoint
-            .set(localX, localY, localZ)
-            .applyMatrix4(matrix)
-            .project(camera)
-          const screenX = (projectedPoint.x * 0.5 + 0.5) * width
-          const screenY = (-projectedPoint.y * 0.5 + 0.5) * height
+          projected[0] = xStep === 0 ? minLocalX : maxLocalX
+          projected[1] = yStep === 0 ? minLocalY : maxLocalY
+          projected[2] = zStep === 0 ? minLocalZ : maxLocalZ
+          transformPoint(projected, combined, projected)
+          const screenX = (projected[0] * 0.5 + 0.5) * width
+          const screenY = (-projected[1] * 0.5 + 0.5) * height
           minX = Math.min(minX, screenX)
           minY = Math.min(minY, screenY)
           maxX = Math.max(maxX, screenX)
@@ -107,40 +127,23 @@ export const createArchiveSceneInteraction = (
     }
     const pose = motion.getPose(frame.selectedIndex, frame)
     const surfaceRect = projectBounds(
-      pose.matrix,
-      -caseWidth / 2,
-      caseWidth / 2,
-      -caseHeight / 2,
-      caseHeight / 2,
-      -caseDepth / 2,
-      caseDepth / 2,
+      pose.matrix, -half[0], half[0], -half[1], half[1], -half[2], half[2],
     )
-    const activeLabel = labels[1].articleIndex === frame.selectedIndex
-      ? labels[1]
-      : labels[0]
-    const bounds = activeLabel.titleBounds
-    const titleLeft = (
-      bounds.left / activeLabel.logicalWidth - 0.5
-    ) * labelWidth
-    const titleRight = (
-      (bounds.left + bounds.width) / activeLabel.logicalWidth - 0.5
-    ) * labelWidth
-    const titleTop = (
-      0.5 - bounds.top / activeLabel.logicalHeight
-    ) * labelHeight
-    const titleBottom = (
-      0.5 - (bounds.top + bounds.height) / activeLabel.logicalHeight
-    ) * labelHeight
+    const label = labelFor(frame.selectedIndex)
+    if (!label) {
+      return { surfaceRect, titleRect: surfaceRect }
+    }
+    // The cover artwork fills the whole front face.
+    const bounds = label.titleBounds
     const titleRect = projectBounds(
       pose.matrix,
-      titleLeft,
-      titleRight,
-      titleBottom,
-      titleTop,
-      caseDepth / 2 + 0.008,
-      caseDepth / 2 + 0.008,
+      (bounds.left / label.logicalWidth - 0.5) * caseWidth,
+      ((bounds.left + bounds.width) / label.logicalWidth - 0.5) * caseWidth,
+      (0.5 - (bounds.top + bounds.height) / label.logicalHeight) * caseHeight,
+      (0.5 - bounds.top / label.logicalHeight) * caseHeight,
+      half[2],
+      half[2],
     )
-
     return { surfaceRect, titleRect }
   }
 
@@ -156,31 +159,41 @@ export const createArchiveSceneInteraction = (
     ) {
       return null
     }
+    if (!mat4Invert(inverse, camera.viewProjection)) {
+      return null
+    }
+    far[0] = ((clientX - rect.left) / rect.width) * 2 - 1
+    far[1] = -((clientY - rect.top) / rect.height) * 2 + 1
+    far[2] = 1
+    transformPoint(far, inverse, far)
+    direction[0] = far[0] - camera.position[0]
+    direction[1] = far[1] - camera.position[1]
+    direction[2] = far[2] - camera.position[2]
 
-    pickPoint.set(
-      ((clientX - rect.left) / rect.width) * 2 - 1,
-      -((clientY - rect.top) / rect.height) * 2 + 1,
-    )
-    raycaster.setFromCamera(pickPoint, camera)
-    const intersections = raycaster.intersectObjects(
-      [...shelves.filter(({ group }) => group.visible).map(({ cases }) => cases), ...activeCases],
-      false,
-    )
-    for (const intersection of intersections) {
-      const shelf = shelfByMesh.get(intersection.object)
-      if (shelf && intersection.instanceId !== undefined) {
-        return shelf.articleIndices[intersection.instanceId] ?? null
-      }
-      const articleIndex: unknown = intersection.object.userData.articleIndex
-      if (
-        typeof articleIndex === 'number'
-        && Number.isInteger(articleIndex)
-        && articleIndex >= 0
-      ) {
-        return articleIndex
+    let nearest = Infinity
+    let picked: number | null = null
+    const consider = (articleIndex: number, model: Mat4) => {
+      const distance = rayHitsBook(inverse, model, camera.position, direction)
+      if (distance < nearest) {
+        nearest = distance
+        picked = articleIndex
       }
     }
-    return null
+    const frame = getFrame()
+    for (const articleIndex of getActive()) {
+      consider(articleIndex, motion.getPose(articleIndex, frame).matrix)
+    }
+    for (const shelf of shelves.shelves) {
+      if (!shelf.visible) {
+        continue
+      }
+      for (const articleIndex of shelf.articleIndices) {
+        if (!shelves.isActive(articleIndex)) {
+          consider(articleIndex, layout.restMatrices[articleIndex])
+        }
+      }
+    }
+    return picked
   }
 
   return {

@@ -1,3 +1,6 @@
+// The renderer is small enough to ship with the page, so the shelf does not
+// wait on a second request after the page has loaded.
+import { createArchiveScene } from '~/lib/archive-scene'
 import type { ArchiveSceneEngine, ArchiveSceneFrame, ArchiveSceneRects } from '~/lib/archive-scene'
 import { createArchiveNavigation } from '~/lib/archive-navigation'
 
@@ -34,7 +37,7 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
   const currentShelfIndex = ref(0)
   const selectedIndex = ref<number | null>(null)
   const currentIndex = ref(0)
-  const navigationPosition = ref(-0.5)
+  const targetIndex = ref(0)
   const hitVisible = ref(false)
   const hitStyle = ref<Record<string, string>>({})
   const yearShelves = computed(() => {
@@ -60,10 +63,13 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
   const currentArticle = computed(() => selectedIndex.value === null
     ? undefined : props.articles[selectedIndex.value])
   const controlsAvailable = computed(() => ready.value && !opening.value)
+  // With nothing selected either arrow brings out the book under the camera.
   const canGoPreviousArticle = computed(() => controlsAvailable.value
-    && navigationPosition.value > (currentShelfArticleIndices.value[0] ?? 0) + 0.0001)
+    && (selectedIndex.value === null
+      || targetIndex.value > (currentShelfArticleIndices.value[0] ?? 0)))
   const canGoNextArticle = computed(() => controlsAvailable.value
-    && navigationPosition.value < (currentShelfArticleIndices.value.at(-1) ?? 0) - 0.0001)
+    && (selectedIndex.value === null
+      || targetIndex.value < (currentShelfArticleIndices.value.at(-1) ?? 0)))
   const hasPreviousShelf = computed(() => currentShelfIndex.value > 0)
   const hasNextShelf = computed(() => currentShelfIndex.value < yearShelves.value.length - 1)
   const formatDate = (value?: string) => {
@@ -87,16 +93,20 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
   const navigation = createArchiveNavigation(0, Math.max(0, props.articles.length - 1))
   const lastVisitedByShelf = new Map<number, number>()
   const sceneFrame: ArchiveSceneFrame = {
-    position: -0.5, selectedIndex: null, firstIndex: 0,
+    position: 0, presence: 0, speed: 0, selectedIndex: null, firstIndex: 0,
     lastIndex: Math.max(0, props.articles.length - 1), deltaSeconds: 1 / 60,
     selectionProgress: 0, hovered: false,
   }
   let engine: ArchiveSceneEngine | null = null
   let resizeObserver: ResizeObserver | null = null
   let animationFrame = 0
+  let introTimer = 0
+  let fontRefreshTimer = 0
+  let titleFontFamily = 'sans-serif'
   let lastFrameTime = 0
   let disposed = false
   let activeHitRect: DOMRect | null = null
+  let hitIndex: number | null = null
   let selectionTween: {
     from: number; to: number; startedAt: number; duration: number; resolve: () => void
   } | null = null
@@ -107,16 +117,22 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
     }
   }
 
-  const updateHitTarget = (cameraMoving: boolean) => {
+  const hideHitTarget = () => {
     hitVisible.value = false
     activeHitRect = null
-    if (!engine || !stage.value || opening.value || selectedIndex.value === null
-      || input.dragging.value || cameraMoving) {
+    hitIndex = null
+  }
+
+  // Reads layout, so it runs when a book arrives rather than on every frame.
+  const updateHitTarget = () => {
+    if (!engine || !stage.value || opening.value || selectedIndex.value === null) {
+      hideHitTarget()
       return
     }
     const rect = engine.getActiveRects().surfaceRect
     const host = stage.value.getBoundingClientRect()
     activeHitRect = rect
+    hitIndex = selectedIndex.value
     hitStyle.value = {
       width: `${Math.max(44, rect.width)}px`,
       height: `${Math.max(44, rect.height)}px`,
@@ -125,26 +141,27 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
     hitVisible.value = true
   }
 
-  const draw = (deltaSeconds = 1 / 60) => {
+  const draw = (deltaSeconds = 0) => {
+    const selected = navigation.selectedIndex
     sceneFrame.position = navigation.position
-    navigationPosition.value = navigation.destination ?? navigation.position
-    sceneFrame.selectedIndex = navigation.selectedIndex
+    sceneFrame.presence = navigation.presence
+    sceneFrame.speed = Math.abs(navigation.velocity)
+    sceneFrame.selectedIndex = selected
     sceneFrame.deltaSeconds = deltaSeconds
-    selectedIndex.value = navigation.selectedIndex
-    const nearest = Math.min(sceneFrame.lastIndex, Math.max(sceneFrame.firstIndex,
-      Math.round(navigation.position)))
-    currentIndex.value = Math.min(sceneFrame.lastIndex, Math.max(sceneFrame.firstIndex,
-      Math.round(navigation.destination ?? nearest)))
-    const moving = engine?.draw(sceneFrame) ?? false
-    updateHitTarget(moving)
-    return moving
+    selectedIndex.value = selected
+    targetIndex.value = navigation.target
+    // The status line names the book in front of the reader as the row moves.
+    currentIndex.value = Math.min(sceneFrame.lastIndex, Math.max(
+      sceneFrame.firstIndex, Math.round(navigation.position),
+    ))
+    return engine?.draw(sceneFrame) ?? false
   }
 
   const frame = (now: number) => {
     animationFrame = 0
     const seconds = Math.min(0.05, Math.max(0.001, (now - (lastFrameTime || now - 16.67)) / 1000))
     lastFrameTime = now
-    const moving = navigation.advance(seconds)
+    const travelling = navigation.advance(seconds)
     if (selectionTween) {
       const progress = Math.min(1, (now - selectionTween.startedAt) / selectionTween.duration)
       sceneFrame.selectionProgress = selectionTween.from
@@ -154,13 +171,28 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
         selectionTween = null
       }
     }
-    const cameraMoving = draw(seconds)
-    if (moving || cameraMoving || selectionTween) {
-      requestDraw()
-    } else {
-      lastFrameTime = 0
-      announcedIndex.value = selectedIndex.value
+    const animating = draw(seconds)
+    const selected = selectedIndex.value
+    // The cover can be opened as soon as it has visibly arrived; the last
+    // soft settle of the pose does not hold the reader back.
+    const arrived = selected !== null && !navigation.dragging && !opening.value
+      && Math.abs(navigation.position - selected) < 0.02 && navigation.presence > 0.985
+    if (!arrived) {
+      if (hitVisible.value) {
+        hideHitTarget()
+      }
+    } else if (hitIndex !== selected) {
+      updateHitTarget()
     }
+    if (travelling || animating || selectionTween) {
+      requestDraw()
+      return
+    }
+    lastFrameTime = 0
+    if (arrived) {
+      updateHitTarget()
+    }
+    announcedIndex.value = selected
   }
 
   const setHovered = (value: boolean) => {
@@ -174,18 +206,28 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
     if (!controlsAvailable.value) {
       return
     }
-    input.cancel()
+    if (input.cancel()) {
+      navigation.release(false)
+    }
     navigation.goTo(index)
-    currentIndex.value = navigation.destination ?? currentIndex.value
     sceneFrame.hovered = false
     requestDraw()
   }
 
   const goInShelf = (direction: -1 | 1) => {
-    const position = navigation.destination ?? navigation.position
-    const next = direction === 1 ? Math.floor(position + 0.0001) + 1
-      : Math.ceil(position - 0.0001) - 1
-    goToIndex(next)
+    if (!controlsAvailable.value) {
+      return
+    }
+    if (selectedIndex.value === null) {
+      goToIndex(currentIndex.value)
+      return
+    }
+    if (input.cancel()) {
+      navigation.release(false)
+    }
+    navigation.step(direction)
+    sceneFrame.hovered = false
+    requestDraw()
   }
 
   const goToShelf = (index: number, preferred?: number) => {
@@ -200,15 +242,16 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
       return
     }
     input.cancel()
-    lastVisitedByShelf.set(currentShelfIndex.value, navigation.position)
+    lastVisitedByShelf.set(currentShelfIndex.value, currentIndex.value)
     currentShelfIndex.value = shelfIndex
     const indices = currentShelfArticleIndices.value
     sceneFrame.firstIndex = indices[0]
     sceneFrame.lastIndex = indices[indices.length - 1]
-    navigation.setRange(sceneFrame.firstIndex, sceneFrame.lastIndex,
-      preferred ?? lastVisitedByShelf.get(shelfIndex))
+    const destination = preferred ?? lastVisitedByShelf.get(shelfIndex) ?? indices[0]
+    navigation.setRange(sceneFrame.firstIndex, sceneFrame.lastIndex, destination)
+    // The camera glides to the new shelf; its book comes out as it arrives.
+    navigation.goTo(destination, 0.24)
     sceneFrame.hovered = false
-    currentIndex.value = Math.max(indices[0], Math.round(navigation.position))
     requestDraw()
   }
 
@@ -228,6 +271,7 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
     }
     opening.value = true
     input.cancel()
+    hideHitTarget()
     navigation.hold(selectedIndex.value)
     sceneFrame.hovered = false
     await animateSelection(1, 300)
@@ -292,21 +336,30 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
     move(delta) {
       navigation.moveBy(delta)
       sceneFrame.hovered = false
-      if (delta !== 0) {
-        hitVisible.value = false
-      }
       requestDraw()
     },
-    release() {
-      navigation.release()
+    release(flick, commit) {
+      navigation.release(flick, commit)
       requestDraw()
     },
+    shelf: (direction) => goToShelf(currentShelfIndex.value + direction),
     hover(x, y) {
       setHovered(Boolean(activeHitRect && x >= activeHitRect.left && x <= activeHitRect.right
         && y >= activeHitRect.top && y <= activeHitRect.bottom))
     },
-    activate: () => activateCurrent(),
-    navigate(key) {
+    activate() {
+      if (selectedIndex.value === null) {
+        goToIndex(currentIndex.value)
+      } else {
+        activateCurrent()
+      }
+    },
+    navigate(key, repeat) {
+      // A held key keeps pace with the flips instead of queueing ahead of
+      // them, so letting go stops on the book that is coming out.
+      if (repeat && Math.abs(navigation.goal - navigation.position) > 0.35) {
+        return
+      }
       if (key === 'arrowleft' || key === 'a') {
         goInShelf(-1)
       } else if (key === 'arrowright' || key === 'd') {
@@ -321,6 +374,7 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
         goToIndex(sceneFrame.lastIndex)
       } else if (key === 'escape') {
         navigation.deselect()
+        sceneFrame.hovered = false
         requestDraw()
       }
     },
@@ -335,11 +389,17 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
 
   const resize = () => {
     engine?.resize()
+    hideHitTarget()
+    // Resizing clears the canvas. Repaint before the browser presents it,
+    // rather than a frame later, so the scene never flashes empty.
+    draw()
     requestDraw()
   }
 
   const teardown = () => {
     input.cancel()
+    window.clearTimeout(introTimer)
+    window.clearTimeout(fontRefreshTimer)
     cancelAnimationFrame(animationFrame)
     animationFrame = 0
     resizeObserver?.disconnect()
@@ -348,11 +408,26 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
     window.removeEventListener('blur', onBlur)
     document.removeEventListener('visibilitychange', onVisibilityChange)
     canvas.value?.removeEventListener('webglcontextlost', onContextLost)
+    document.fonts.removeEventListener('loadingdone', onFontsLoaded)
     selectionTween?.resolve()
     selectionTween = null
     document.documentElement.classList.remove('archive-scene-active')
     engine?.destroy()
     engine = null
+  }
+  const onFontsLoaded = (event: Event) => {
+    const faces = (event as FontFaceSetLoadEvent).fontfaces || []
+    if (!faces.some((face) => titleFontFamily.includes(face.family.replace(/["']/g, '')))) {
+      return
+    }
+    // CJK fonts arrive as many unicode-range slices, each with its own event.
+    // Repaint the titles once the burst settles rather than once per slice.
+    window.clearTimeout(fontRefreshTimer)
+    fontRefreshTimer = window.setTimeout(() => {
+      engine?.refreshTypography()
+      hideHitTarget()
+      requestDraw()
+    }, 120)
   }
   const onContextLost = () => {
     teardown()
@@ -360,7 +435,7 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
   }
   const onBlur = () => {
     if (input.cancel()) {
-      navigation.release()
+      navigation.release(false)
       requestDraw()
     }
   }
@@ -388,7 +463,9 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
       return
     }
     const context = canvas.value.getContext('webgl2', {
-      alpha: false, antialias: true, depth: true, stencil: false,
+      // Lines and tone are antialiased in the shader. Multisampling is only
+      // worth its memory on low-density screens, where a stepped edge shows.
+      alpha: false, antialias: (window.devicePixelRatio || 1) < 2, depth: true, stencil: false,
       preserveDrawingBuffer: false, powerPreference: 'low-power', failIfMajorPerformanceCaveat: true,
     })
     if (!context) {
@@ -396,19 +473,15 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
       return
     }
     try {
-      const { createArchiveScene } = await import('~/lib/archive-scene')
-      if (disposed || !stage.value || !canvas.value) {
-        context.getExtension('WEBGL_lose_context')?.loseContext()
-        return
-      }
       const styles = getComputedStyle(stage.value)
+      titleFontFamily = styles.getPropertyValue('--font-serif').trim() || 'sans-serif'
       engine = createArchiveScene({
         canvas: canvas.value, context, host: stage.value, articles: props.articles,
         // Reported CPU concurrency is not a measure of GPU capability. In
         // particular, an absent value must not force Retina text down to 1.25x.
         lowPower: (nav.deviceMemory ?? 8) <= 2,
         locale: locale.value,
-        titleFontFamily: styles.getPropertyValue('--font-serif').trim() || 'sans-serif',
+        titleFontFamily,
         backgroundColor: cssColorToNumber(styles.backgroundColor),
         theme: {
           surface: cssColorToNumber(styles.getPropertyValue('--color-surface')),
@@ -418,10 +491,9 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
           border: cssColorToNumber(styles.getPropertyValue('--color-border')),
         },
       })
-      void document.fonts.ready.then(() => {
-        engine?.refreshTypography()
-        requestDraw()
-      })
+      // Titles are drawn at once in whatever font is available and redrawn
+      // when a web font of theirs arrives, however late on a slow connection.
+      document.fonts.addEventListener('loadingdone', onFontsLoaded)
     } catch (error) {
       console.error('[archive] scene initialization failed', error)
       context.getExtension('WEBGL_lose_context')?.loseContext()
@@ -433,7 +505,12 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
       yearShelves.value.findIndex((shelf) => shelf.articleIndices.includes(initial)))
     sceneFrame.firstIndex = currentShelfArticleIndices.value[0]
     sceneFrame.lastIndex = currentShelfArticleIndices.value.at(-1) ?? initial
-    navigation.setRange(sceneFrame.firstIndex, sceneFrame.lastIndex, props.returning ? initial : initial - 0.5)
+    navigation.setRange(sceneFrame.firstIndex, sceneFrame.lastIndex, initial)
+    if (props.returning) {
+      // Coming back from an article: its book is already out and facing us.
+      navigation.hold(initial)
+    }
+    engine.place()
     sceneFrame.selectionProgress = props.returning ? 1 : 0
     opening.value = props.returning
     ready.value = true
@@ -443,7 +520,7 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
       return
     }
     engine.resize()
-    draw(1)
+    draw()
     resizeObserver = new ResizeObserver(resize)
     resizeObserver.observe(stage.value)
     canvas.value?.addEventListener('webglcontextlost', onContextLost, { once: true })
@@ -453,6 +530,15 @@ export const useArchiveScene = (props: ArchiveSceneProps, events: ArchiveSceneEv
     document.documentElement.classList.add('archive-scene-active')
     events.ready({ getActiveRects, finishReturnPose })
     requestDraw()
+    if (!props.returning) {
+      // Let the shelf be seen for a beat, then bring the first book out,
+      // unless the reader has already started browsing.
+      introTimer = window.setTimeout(() => {
+        if (navigation.selectedIndex === null) {
+          goToIndex(initial)
+        }
+      }, 260)
+    }
   })
 
   onBeforeUnmount(() => {

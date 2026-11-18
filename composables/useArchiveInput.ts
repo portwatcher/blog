@@ -1,38 +1,64 @@
 import type { Ref } from 'vue'
+import { createArchiveWheel } from '~/lib/archive-gestures'
 
 interface ArchiveInputOptions {
   stage: Ref<HTMLElement | null>
   available: () => boolean
+  // Scrubs the row under the pointer, in books.
   move: (delta: number) => void
-  release: () => void
+  // Lets go of the row. `flick` allows a release that is still moving to
+  // carry on to the neighbour; `commit` is the travel that counts as a flip.
+  release: (flick: boolean, commit?: number) => void
+  shelf: (direction: -1 | 1) => void
   hover: (x: number, y: number) => void
-  navigate: (key: string) => void
+  navigate: (key: string, repeat: boolean) => void
   activate: () => void
 }
 
+const navigationKeys = [
+  'arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'a', 'd', 'w', 's', 'home', 'end', 'escape',
+]
+const shelfSwipePixels = 48
+const wheelIdleMs = 110
+
 export const useArchiveInput = (options: ArchiveInputOptions) => {
   const dragging = ref(false)
+  const wheel = createArchiveWheel()
   let wheelTimer = 0
   let suppressClickUntil = 0
   let gesture: {
     id: number
     x: number
-    y: number
     startX: number
     startY: number
+    slop: number
+    touch: boolean
     axis: 'x' | 'y' | null
+    shelved: boolean
   } | null = null
 
-  const pixelsPerArticle = () => {
+  // How far the hand travels to turn one book. Short enough that the book
+  // visibly follows the hand from the first few pixels, long enough that the
+  // whole movement can be scrubbed and held part-way. A finger covers more
+  // of a small screen than a mouse does of a large one.
+  const pixelsPerBook = (touch = false) => {
     const width = options.stage.value?.clientWidth || window.innerWidth
-    // A longer gesture gives extraction room to unfold, without adding lag.
-    return Math.min(570, Math.max(180, width * 0.42))
+    return touch
+      ? Math.min(300, Math.max(150, width * 0.42))
+      : Math.min(240, Math.max(140, width * 0.19))
+  }
+
+  const settleWheel = () => {
+    if (!wheelTimer) {
+      return false
+    }
+    window.clearTimeout(wheelTimer)
+    wheelTimer = 0
+    return true
   }
 
   const cancel = () => {
-    const active = gesture !== null || wheelTimer !== 0
-    window.clearTimeout(wheelTimer)
-    wheelTimer = 0
+    const active = gesture?.axis === 'x' || settleWheel()
     const pointerId = gesture?.id
     gesture = null
     dragging.value = false
@@ -46,7 +72,7 @@ export const useArchiveInput = (options: ArchiveInputOptions) => {
     if (!event.isPrimary) {
       // Let a second touch become a browser pinch gesture.
       if (cancel()) {
-        options.release()
+        options.release(false)
       }
       return
     }
@@ -57,19 +83,27 @@ export const useArchiveInput = (options: ArchiveInputOptions) => {
     if (target?.closest('button, a, input')) {
       return
     }
-    window.clearTimeout(wheelTimer)
-    wheelTimer = 0
-    options.move(0)
+    if (cancel()) {
+      options.release(false)
+    }
+    const mouse = event.pointerType === 'mouse'
     gesture = {
       id: event.pointerId,
       x: event.clientX,
-      y: event.clientY,
       startX: event.clientX,
       startY: event.clientY,
+      slop: mouse ? 3 : 8,
+      touch: !mouse,
       axis: null,
+      shelved: false,
     }
-    options.stage.value?.setPointerCapture(event.pointerId)
-    if (event.pointerType === 'mouse') {
+    try {
+      options.stage.value?.setPointerCapture(event.pointerId)
+    } catch {
+      // The pointer may already be gone; the drag still works while it stays
+      // over the stage.
+    }
+    if (mouse) {
       event.preventDefault()
       options.stage.value?.focus({ preventScroll: true })
     }
@@ -82,20 +116,28 @@ export const useArchiveInput = (options: ArchiveInputOptions) => {
       }
       return
     }
-    const deltaX = event.clientX - gesture.x
-    const deltaY = event.clientY - gesture.y
-    if (!gesture.axis && (deltaX || deltaY)) {
-      gesture.axis = Math.abs(deltaX) >= Math.abs(deltaY) ? 'x' : 'y'
-    }
-    const delta = -(gesture.axis === 'x' ? deltaX : deltaY) / pixelsPerArticle()
-    gesture.x = event.clientX
-    gesture.y = event.clientY
-    if (Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY) > 3) {
+    if (!gesture.axis) {
+      const travelX = event.clientX - gesture.startX
+      const travelY = event.clientY - gesture.startY
+      // A press that barely moves stays a click and leaves the book in place.
+      if (Math.hypot(travelX, travelY) <= gesture.slop) {
+        return
+      }
+      gesture.axis = Math.abs(travelX) >= Math.abs(travelY) ? 'x' : 'y'
       dragging.value = true
     }
-    // Even sub-threshold movement reaches the scene. The threshold only
-    // distinguishes a click from a drag; it never gates animation input.
-    options.move(delta)
+    if (gesture.axis === 'x') {
+      // The travel spent deciding the gesture is included, so nothing is lost.
+      options.move(-(event.clientX - gesture.x) / pixelsPerBook(gesture.touch))
+      gesture.x = event.clientX
+      return
+    }
+    const travel = event.clientY - gesture.startY
+    if (!gesture.shelved && Math.abs(travel) >= shelfSwipePixels) {
+      gesture.shelved = true
+      // Swiping up reveals the shelf below, as scrolling a page would.
+      options.shelf(travel < 0 ? 1 : -1)
+    }
   }
 
   const onPointerEnd = (event: PointerEvent) => {
@@ -105,8 +147,10 @@ export const useArchiveInput = (options: ArchiveInputOptions) => {
     if (dragging.value) {
       suppressClickUntil = performance.now() + 350
     }
-    cancel()
-    options.release()
+    if (cancel()) {
+      // A cancelled gesture has no speed worth trusting.
+      options.release(event.type === 'pointerup')
+    }
   }
 
   const onWheel = (event: WheelEvent) => {
@@ -118,12 +162,19 @@ export const useArchiveInput = (options: ArchiveInputOptions) => {
       : event.deltaMode === 2 ? (options.stage.value?.clientHeight || 800) : 1
     const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY)
       ? event.deltaX : event.deltaY
-    options.move(delta * unit / pixelsPerArticle())
-    window.clearTimeout(wheelTimer)
-    wheelTimer = window.setTimeout(() => {
-      wheelTimer = 0
-      options.release()
-    }, 160)
+    const { move, settle } = wheel.push(delta * unit, event.timeStamp, pixelsPerBook())
+    if (move) {
+      options.move(move)
+      window.clearTimeout(wheelTimer)
+      wheelTimer = window.setTimeout(() => {
+        wheelTimer = 0
+        options.release(false, wheel.commit)
+      }, wheelIdleMs)
+    }
+    if (settle && settleWheel()) {
+      // The neighbour is fully out: come to rest now, not after the inertia.
+      options.release(false, wheel.commit)
+    }
   }
 
   const onKeydown = (event: KeyboardEvent) => {
@@ -136,10 +187,12 @@ export const useArchiveInput = (options: ArchiveInputOptions) => {
       return
     }
     const key = event.key.toLowerCase()
-    if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'a', 'd', 'w', 's', 'home', 'end', 'escape'].includes(key)) {
+    if (navigationKeys.includes(key)) {
       event.preventDefault()
-      cancel()
-      options.navigate(key)
+      if (cancel()) {
+        options.release(false)
+      }
+      options.navigate(key, event.repeat)
     } else if (options.stage.value?.contains(target)
       && !target?.matches('button, a') && ['enter', ' '].includes(key)) {
       event.preventDefault()
