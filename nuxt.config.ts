@@ -1,4 +1,7 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { type GiscusProps } from '@giscus/vue'
 import Aura from '@primevue/themes/aura'
 import { definePreset } from '@primevue/themes'
@@ -20,6 +23,15 @@ const BlogPreset = definePreset(Aura, {
     },
   },
 })
+
+// The font stylesheet is cached by browsers and by the CDN in front of the
+// site. Its address carries a fingerprint of its contents, so regenerated
+// fonts are picked up on the next deploy instead of whenever those caches
+// happen to expire, by which time the files an old copy points at are gone.
+const fontStylesheet = `/fonts.css?v=${createHash('sha256')
+  .update(readFileSync(fileURLToPath(new URL('./public/fonts.css', import.meta.url))))
+  .digest('hex')
+  .slice(0, 12)}`
 
 export default defineNuxtConfig({
   devtools: { enabled: true },
@@ -59,7 +71,7 @@ export default defineNuxtConfig({
       // body, they do not hold up the first paint: text shows in a fallback
       // font and swaps, as `font-display: swap` already allows.
       link: [
-        { rel: 'stylesheet', href: '/fonts.css', tagPosition: 'bodyClose' },
+        { rel: 'stylesheet', href: fontStylesheet, tagPosition: 'bodyClose' },
       ],
     },
   },

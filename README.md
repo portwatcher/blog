@@ -51,8 +51,10 @@ Google Fonts serves them, so a page downloads only the slices for the
 characters it shows. The weight axis stays variable (Latin 100–900, CJK
 200–900). `public/fonts.css` is linked as a file from the end of the page
 rather than bundled, so its declarations are cached instead of being inlined
-into every page's HTML, and they never delay the first paint. It and the slices
-are generated; do not edit them by hand. To rebuild them, install fonttools with brotli and run the script from
+into every page's HTML, and they never delay the first paint. The link carries
+a fingerprint of the file's contents, so browsers and a CDN in front of the site
+pick up regenerated fonts on the next deploy rather than when their caches
+expire. It and the slices are generated; do not edit them by hand. To rebuild them, install fonttools with brotli and run the script from
 the repository root:
 
 ```bash
