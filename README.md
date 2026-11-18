@@ -43,6 +43,29 @@ and `pnpm build` to verify the production build.
 
 The app can run against local Markdown under `content/`, but production-style usage expects a separate content repository.
 
+## Web Fonts
+
+Noto Sans, Noto Serif, Noto Serif SC and Noto Serif JP are self-hosted under
+`public/fonts/noto/` as woff2 files split into `unicode-range` slices, the way
+Google Fonts serves them, so a page downloads only the slices for the
+characters it shows. The weight axis stays variable (Latin 100–900, CJK
+200–900). `public/fonts.css` and the slices are generated; do not edit them by
+hand. To rebuild them, install fonttools with brotli and run the script from
+the repository root:
+
+```bash
+python3 -m pip install 'fonttools[woff]'
+```
+
+```bash
+python3 scripts/fonts/build.py
+```
+
+The script extracts the original variable TTFs from the git commit named in
+`SOURCE_COMMIT` (or reads them from `--src <dir>`), pins the Latin width axis
+to 100, and cuts slices with the ranges in `scripts/fonts/slices.json`, which
+were taken from the Google Fonts CSS for these families.
+
 ## Archive 3D Interaction
 
 The archive opens in 3D by default and, after a beat, brings the newest book out.
