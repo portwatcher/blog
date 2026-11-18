@@ -49,8 +49,10 @@ Noto Sans, Noto Serif, Noto Serif SC and Noto Serif JP are self-hosted under
 `public/fonts/noto/` as woff2 files split into `unicode-range` slices, the way
 Google Fonts serves them, so a page downloads only the slices for the
 characters it shows. The weight axis stays variable (Latin 100–900, CJK
-200–900). `public/fonts.css` and the slices are generated; do not edit them by
-hand. To rebuild them, install fonttools with brotli and run the script from
+200–900). `public/fonts.css` is linked as a file from the end of the page
+rather than bundled, so its declarations are cached instead of being inlined
+into every page's HTML, and they never delay the first paint. It and the slices
+are generated; do not edit them by hand. To rebuild them, install fonttools with brotli and run the script from
 the repository root:
 
 ```bash

@@ -29,7 +29,6 @@ export default defineNuxtConfig({
     '@nuxt/image',
     '@primevue/nuxt-module',
   ],
-  css: ['@/public/fonts.css'],
   primevue: {
     options: {
       theme: {
@@ -54,6 +53,14 @@ export default defineNuxtConfig({
     head: {
       charset: 'utf-8',
       viewport: 'width=device-width, initial-scale=1, viewport-fit=cover',
+      // The font declarations are a couple of hundred unicode-range slices.
+      // Bundled as CSS they would be inlined into every page's HTML; as a
+      // file they are downloaded once and cached. Linked from the end of the
+      // body, they do not hold up the first paint: text shows in a fallback
+      // font and swaps, as `font-display: swap` already allows.
+      link: [
+        { rel: 'stylesheet', href: '/fonts.css', tagPosition: 'bodyClose' },
+      ],
     },
   },
   content: {
